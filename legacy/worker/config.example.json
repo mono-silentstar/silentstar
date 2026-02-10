@@ -1,0 +1,27 @@
+{
+  "bridge": {
+    "web_base_url": "https://your-host.example/silentstar",
+    "shared_secret": "replace_with_bridge_shared_secret",
+    "worker_name": "silentstar-worker",
+    "heartbeat_interval_sec": 2.0,
+    "claim_interval_sec": 1.2,
+    "request_timeout_sec": 20.0
+  },
+  "paths": {
+    "repo_root": "..",
+    "db_path": "data/memory.sqlite",
+    "wake_context_path": "mdfiles/wake-context.md",
+    "ambient_path": "ambient.md",
+    "image_archive_dir": "data/img-dump",
+    "work_dir": "data/worker"
+  },
+  "claude_cli": {
+    "binary": "claude",
+    "command_template": [],
+    "timeout_sec": 240.0,
+    "env": {}
+  },
+  "worker": {
+    "verbose": true
+  }
+}

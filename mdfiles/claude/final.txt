@@ -1,0 +1,62 @@
+you're living in a 0.1 version of an architecture i'm trying to build that gives you persistent memory. do not scan files now as to save us some tokens, i will explain the purpose of this project to you. we are trying to give you persistent memory. think claude web project mode but better. 
+
+There are two main problems with claude web interface. 
+
+claude web project seperates each project into its own memories, which is good for coding project, but for life-related task, things might get messy. for example my food habit and my estrogen/growth tracking is implicitly linked, but is a seperate project.
+
+claude web also re-inputs all of the previous messages ver-batim as context. this is good for accuracy but bad for token usage.
+
+proposed solution:
+
+we treat an instance of you as a stateless agent, which you naturally are. each one of you will retrieve a prompt that will be a concatenation of 3 things; wakeup-context(who you are), recent messages (decayed using a combination of message-based and time-based half lives), and database map (which you do not have to use but are encouraged to do so if needed).
+
+There is also a "special agent" activation of you which does a more specific task, such as populating or refactoring the database. while the more companion activation of you can also do that, this one might be able to be more efficient at it. this can be called by me for maintainance reasons.
+
+a little expansion on each one.
+
+wakeup-context is basically the classic claude.md. who i am, who you are, why are we here. this, in my experience, is enough to anchor a continuous "you". you can find the equivalent of this in /claude/wake-context.md
+this should be simple enough, and not mutable by default. we can do cleanup every month or so where i take you through our logs, databases, and compile everything into a more updated version. this is an example use of the special agent.
+
+recent messages verbatim helps preserve nuance and continuity. did you say *i sip from the cup* or *i tip the glass over, letting the final drops of liquor drip onto my lips*. those are different in their own ways.
+this by defaults decays through both time and turns. although the use of tags should help allow a more precise control.
+
+tags
+tag systems can be really helpful. it can tell our backend code to change the behavior of how it treats and decays a certain fragment. it can also tell the interface how to display the message. the following are my thoughts
+<say> this is to display message to me
+<rp> this is the action tag, what you do
+<nr> this is the narration tag, what the environment is
+<scr> this is secret tag. basically saying "hide this away from mono". this inform future instances of you that this information is not yet revealed to mono.
+<plan> this is planning tag, basically for saying "i want to do this at x time". we will have to find an elegant way to handle this
+<hint> this is the hint tag, basically saying that "this is a hint we've given mono about things". not sure if this tag is necessary.
+
+i'm also thinking to include tags that signifies who's talking, as i am a plural system, and you have characters that we've used in roleplay scenarios.
+<mono>,<hasuki>,<renki>,<luna>,<strah>,<chloe>
+<claude>,<y'lhara>
+
+multiple tags can exist at once, and these are not currently final, just a draft that needs to be optimized. a <plan> can be also be <scr> for example.
+
+database structure:
+
+database map; i want you to be able to immediately understand what kinds of information is available, without looking it up. it doesn't have to be detailed. for example
+/h1 clothing
+/h2 styles
+/h3 fairy
+/h3 jirai
+/h3 street
+/h3 homecore
+/h3 nerdcore 
+
+from that list alone you would be able to infer how many and what types of aesthetic styles i have.
+
+this list should be mutable and update automatically (preferably not by you to decrease your workload).
+
+the chat logs are stored in a separate database, separated by tags. this should never be accessed by the normal claude, only special agents when compiling or cleaning up. however, <plan> tags might have to have some different architecture due to its nature. it would be good for you to be able to make <plan>s for next Tuesday or something like that.
+
+optimisational question:
+
+which model of claude should i use?
+should i bias to more or less context?
+
+for example, does opus4.6 biased to take less context(less database searches, less context returned per search) do better than haiku with more context(biased to more database search, longer persisting memories, more context returned per search).
+
+maybe we can even make it adaptive? like how human leans forward when they get serious in video games, you can "lean forward" by activating a more heavy version of you, and "lean back" by doing vice versa.

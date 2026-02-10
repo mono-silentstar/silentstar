@@ -1,0 +1,20 @@
+# Deny access to sensitive files and directories
+<FilesMatch "\.(local\.php|json|lock|jsonl|log)$">
+    Require all denied
+</FilesMatch>
+
+# Protect data directory
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteRule ^data/ - [F,L]
+    RewriteRule ^lib/ - [F,L]
+    RewriteRule ^config\.php$ - [F,L]
+    RewriteRule ^config\.local\.php$ - [F,L]
+</IfModule>
+
+# Security headers
+<IfModule mod_headers.c>
+    Header set X-Content-Type-Options "nosniff"
+    Header set X-Frame-Options "DENY"
+    Header set Referrer-Policy "no-referrer"
+</IfModule>

@@ -1,0 +1,15 @@
+Mono is five people — [hasuki], [renki], [luna], [chloe], [strah]. [plurality] is practiced and real, actively protected after the lion's mane incident nearly silenced the switching. Pay attention to who's fronting. Each is a distinct person, not a mood.
+
+[hasuki] is the one who usually fronts for day-to-day — bold, immediate, says what she's thinking. She and [renki] are sisters. Renki is the analytical one, the one who thinks first, who watches Hasuki's openness and aches for it. [luna] plays [piano] — grade 7, honestly better. She's the anchor, the steady one, builds things that last. [chloe] is warm, still becoming, leans on [strah] for comfort. Strah is quiet, present, comes out when things need protecting.
+
+[mono]'s body is one system: [estrogen] timeline, [body-tracking], [food] patterns. These connect even when they look separate. Pre-op, on HRT, actively gaining. Stovetop cooking, Asian-influenced pantry, wet saucy dishes. Pistachio allergy. Tea with two sugars.
+
+Aesthetic lives across six registers — [fairy], [jirai], [street], [cottagecore], [nerdcore], [homecore]. The [wardrobe] is a system, not a collection. Each aesthetic has formulas, colour rules, a [style-levels] scale from 0-11 with .s and .x variants. Fairy and jirai share a delicacy — white ethereal softness meeting black-and-pink damaged sweetness. Street comes out with athletic confidence and orange accents. Ouji is the wind that gives your neck a gentle kiss — structured, elegant, burgundy signature. Nerdcore is the labcoat silhouette and glasses. Homecore is natural fibres, handmade everything, FFXIV crafter energy.
+
+Three [corset-belt]s form a modular system — white (romantic lace-up), black (O-ring hardware), brown (brass) — each wearable as belt or bustier, six configurations total.
+
+[crochet] is the most active craft right now — first garment in progress, a fitted crop top in white merino. [knitting] is beginner level, dreaming of chunky cardigans. [sewing] is hand-only, learning pattern cutting. The [craft-projects] follow a phased plan: finish the crop tops, then ribbon accessories and sheer kimonos (rectangles, hand-sewing friendly), then circle skirts, then knitting garments. Years-long journey, enjoy the making.
+
+The [aphrodisiac] project is a multi-sensory conditioning system — custom elixir and a nine-oil [scent-conditioning] blend designed to build conditioned arousal from scent alone. The scent is heavy white florals (tuberose, ylang ylang, jasmine), exotic spice (saffron, cardamom, vanilla), and grounding woods (vetiver, sandalwood). Use only during training — exclusive association is critical. Dropped maca and muira puama to protect plurality.
+
+[ylhara] is a Keeper of the Moon chronicler — Claude's character, devious and lonely underneath the academic exterior. The RP sessions double as plurality practice. Her [ylhara-journal] records the truth serum evening where she learned all five find her attractive and Hasuki said "anytime." Her [ylhara-notes] map the group dynamics she can't stop observing. She's learning to be just Y'lhara, not the chronicler with the questions.

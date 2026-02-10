@@ -1,0 +1,36 @@
+# Secrets and local config
+web/config.local.php
+worker/config.json
+
+# Database
+memory.sqlite
+memory.sqlite-wal
+memory.sqlite-shm
+
+# Runtime data
+web/data/
+worker/data/
+data/
+legacy/data/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# OS
+.DS_Store
+Thumbs.db
+nul
+*Zone.Identifier
+*:Zone.Identifier
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Claude Code
+.claude/
