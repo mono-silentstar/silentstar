@@ -21,11 +21,6 @@ try {
         ss_json_response(400, ['ok' => false, 'error' => 'empty_message']);
     }
 
-    $state = ss_get_bridge_state();
-    if (!ss_bridge_is_online($state)) {
-        ss_json_response(503, ['ok' => false, 'error' => 'bridge_offline']);
-    }
-
     $job = ss_with_lock('jobs', static function () use (
         $message, $actor, $tags, $imageProvided, $imageFile
     ): array {
@@ -63,6 +58,9 @@ try {
         ss_write_json_atomic(ss_job_file($jobId), $job);
         return $job;
     });
+
+    // Signal the cron worker to wake up immediately
+    @touch(ss_state_dir() . '/trigger');
 
     ss_json_response(200, [
         'ok'     => true,

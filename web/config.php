@@ -5,14 +5,12 @@ declare(strict_types=1);
  * Default configuration. Override in config.local.php (same format, gitignored).
  * Environment variables take priority for secrets:
  *   SILENTSTAR_PASSWORD_HASH
- *   SILENTSTAR_BRIDGE_SECRET
  */
 
 $defaults = [
     'app_password_hash'   => '',
-    'bridge_shared_secret' => '',
     'session_cookie_name' => 'silentstar_session',
-    'bridge_online_ttl_sec' => 8,
+    'bridge_online_ttl_sec' => 90,
     'job_stale_sec'       => 300,
     'data_dir'            => 'data',
     'history_file'        => 'data/history.jsonl',
@@ -34,9 +32,4 @@ $envHash = getenv('SILENTSTAR_PASSWORD_HASH');
 if (is_string($envHash) && $envHash !== '') {
     $defaults['app_password_hash'] = $envHash;
 }
-$envSecret = getenv('SILENTSTAR_BRIDGE_SECRET');
-if (is_string($envSecret) && $envSecret !== '') {
-    $defaults['bridge_shared_secret'] = $envSecret;
-}
-
 return $defaults;

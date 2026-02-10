@@ -69,25 +69,3 @@ function ss_logout(): void
     session_destroy();
 }
 
-function ss_require_bridge_secret(): void
-{
-    $configured = trim((string)ss_cfg('bridge_shared_secret', ''));
-    if ($configured === '') {
-        ss_json_response(500, ['ok' => false, 'error' => 'bridge_secret_not_configured']);
-    }
-
-    $provided = '';
-    if (isset($_SERVER['HTTP_X_BRIDGE_SECRET'])) {
-        $provided = (string)$_SERVER['HTTP_X_BRIDGE_SECRET'];
-    }
-    if ($provided === '' && function_exists('getallheaders')) {
-        $headers = getallheaders();
-        if (is_array($headers) && isset($headers['X-Bridge-Secret'])) {
-            $provided = (string)$headers['X-Bridge-Secret'];
-        }
-    }
-
-    if ($provided === '' || !hash_equals($configured, $provided)) {
-        ss_json_response(401, ['ok' => false, 'error' => 'invalid_bridge_secret']);
-    }
-}

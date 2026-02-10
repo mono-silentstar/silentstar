@@ -8,5 +8,4 @@
 
 return [
     'app_password_hash'    => '',  // paste hash here
-    'bridge_shared_secret' => '',  // shared with worker/config.json
 ];
