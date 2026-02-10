@@ -233,15 +233,17 @@ class Worker:
                 self.log(f"downloaded image: {local.name}")
 
         # Build config for the orchestrator
+        cc = ClaudeConfig(timeout_seconds=self.cfg.claude_timeout)
+        if self.cfg.claude_model:
+            cc.model = self.cfg.claude_model
+        # else: uses ClaudeConfig default (opus)
+
         turn_config = TurnConfig(
             db_path=self.cfg.db_path,
             wake_context_path=self.cfg.wake_context_path,
             wake_context_image_path=self.cfg.wake_context_image_path,
             ambient_path=self.cfg.ambient_path,
-            claude_config=ClaudeConfig(
-                timeout_seconds=self.cfg.claude_timeout,
-                model=self.cfg.claude_model,
-            ),
+            claude_config=cc,
         )
 
         # Run the turn
@@ -261,6 +263,10 @@ class Worker:
             )
             self.log(f"job {job_id} failed: {result.error}")
             return
+
+        # Debug: show what Claude actually said
+        raw = result.response_text
+        self.log(f"raw response ({len(raw)} chars): {raw[:300]}{'...' if len(raw) > 300 else ''}")
 
         # Extract display spans from raw response
         display = extract_display_spans(result.response_text)

@@ -70,6 +70,11 @@ Syntax — conversation:
 <say> dialogue | <do> action | <narrate> scene
 Decays with turns. What I said and did recently.
 
+Everything visible must be wrapped in a display tag. No bare text.
+If I want to speak: <say>like this</say>. If I want to act:
+<do>like this</do>. Plain text outside tags is processing — logged
+but invisible to Mono. If nothing is tagged, she sees nothing.
+
 Syntax — active knowledge (slowest to fastest decay):
 <secret> hidden from Mono — persists until I reveal it
 <pin> held fact, current truth — slowest decay, explicit release
