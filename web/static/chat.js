@@ -28,7 +28,6 @@
   const IDENTITIES = ['hasuki', 'renki', 'luna', 'chloe', 'strah'];
   const FORMATS = ['do', 'narrate'];
   const KNOWLEDGE = ['plan', 'pin'];
-  const ALL_TAGS = [...IDENTITIES, ...FORMATS, ...KNOWLEDGE];
 
   // --- State ---
   let currentIdentity = null;
@@ -87,47 +86,147 @@
     sel.addRange(range);
   }
 
+  function stateMatches(span) {
+    const id = span.dataset.identity || null;
+    const fmt = span.dataset.format || null;
+    const plan = span.dataset.plan === '1';
+    const pin = span.dataset.pin === '1';
+    return id === currentIdentity && fmt === currentFormat &&
+           plan === currentKnowledge.plan && pin === currentKnowledge.pin;
+  }
+
+  function findParentSpan(node) {
+    // Walk up from node to find a SPAN that is a direct child of msgInput
+    while (node && node !== msgInput) {
+      if (node.nodeType === Node.ELEMENT_NODE && node.tagName === 'SPAN' &&
+          node.parentElement === msgInput) {
+        return node;
+      }
+      node = node.parentNode;
+    }
+    return null;
+  }
+
   function ensureActiveSpan() {
     const sel = window.getSelection();
 
-    if (sel.rangeCount) {
-      const range = sel.getRangeAt(0);
-      let node = range.startContainer;
+    // No selection or not inside input — append at end
+    if (!sel.rangeCount || !msgInput.contains(sel.getRangeAt(0).startContainer)) {
+      const span = createSpan();
+      span.appendChild(document.createTextNode('\u200B'));
+      msgInput.appendChild(span);
+      placeCursorIn(span);
+      return;
+    }
 
-      // Find parent span if we're in a text node
-      let parentSpan = null;
-      if (node.nodeType === Node.TEXT_NODE && node.parentElement &&
-          node.parentElement !== msgInput && node.parentElement.tagName === 'SPAN') {
-        parentSpan = node.parentElement;
-      } else if (node.nodeType === Node.ELEMENT_NODE && node.tagName === 'SPAN' &&
-                 node.parentElement === msgInput) {
-        parentSpan = node;
-      }
+    const range = sel.getRangeAt(0);
+    const parentSpan = findParentSpan(range.startContainer);
 
-      // If we're in an empty span, just update it
-      if (parentSpan && isSpanEmpty(parentSpan)) {
-        applyState(parentSpan);
-        return;
+    // Not inside any span (bare text node or msgInput itself) — append new span
+    if (!parentSpan) {
+      const span = createSpan();
+      span.appendChild(document.createTextNode('\u200B'));
+      msgInput.appendChild(span);
+      placeCursorIn(span);
+      return;
+    }
+
+    // Span already matches current state — nothing to do
+    if (stateMatches(parentSpan)) return;
+
+    // Empty span — update in place
+    if (isSpanEmpty(parentSpan)) {
+      applyState(parentSpan);
+      return;
+    }
+
+    // Non-empty span that doesn't match — split at cursor position
+    const newSpan = createSpan();
+    newSpan.appendChild(document.createTextNode('\u200B'));
+
+    // Check if cursor is at start of span content
+    const beforeRange = document.createRange();
+    beforeRange.setStart(parentSpan, 0);
+    beforeRange.setEnd(range.startContainer, range.startOffset);
+    const beforeText = beforeRange.toString().replace(/\u200B/g, '');
+
+    // Check if cursor is at end of span content
+    const afterRange = document.createRange();
+    afterRange.setStart(range.startContainer, range.startOffset);
+    afterRange.setEnd(parentSpan, parentSpan.childNodes.length);
+    const afterText = afterRange.toString().replace(/\u200B/g, '');
+
+    if (afterText === '') {
+      // Cursor at end — insert new span after as sibling
+      parentSpan.after(newSpan);
+    } else if (beforeText === '') {
+      // Cursor at start — insert new span before as sibling
+      parentSpan.before(newSpan);
+    } else {
+      // Cursor in middle — extract trailing content into a clone span
+      const tailRange = document.createRange();
+      tailRange.setStart(range.startContainer, range.startOffset);
+      tailRange.setEnd(parentSpan, parentSpan.childNodes.length);
+      const tailFragment = tailRange.extractContents();
+
+      const afterSpan = document.createElement('span');
+      // Copy state from original span (not current state)
+      if (parentSpan.dataset.identity) afterSpan.dataset.identity = parentSpan.dataset.identity;
+      if (parentSpan.dataset.format) afterSpan.dataset.format = parentSpan.dataset.format;
+      if (parentSpan.dataset.plan) afterSpan.dataset.plan = parentSpan.dataset.plan;
+      if (parentSpan.dataset.pin) afterSpan.dataset.pin = parentSpan.dataset.pin;
+      afterSpan.className = parentSpan.className;
+      afterSpan.appendChild(tailFragment);
+
+      // Insert newSpan then afterSpan after the original
+      parentSpan.after(newSpan);
+      newSpan.after(afterSpan);
+    }
+
+    placeCursorIn(newSpan);
+  }
+
+  function segmentState(span) {
+    return (span.dataset.identity || '') + '|' +
+           (span.dataset.format || '') + '|' +
+           (span.dataset.plan || '') + '|' +
+           (span.dataset.pin || '');
+  }
+
+  function normalizeInput() {
+    // 1. Flatten nested spans — move inner spans to be siblings
+    for (const outer of Array.from(msgInput.querySelectorAll('span span'))) {
+      const parent = outer.parentElement;
+      if (parent && parent.tagName === 'SPAN' && msgInput.contains(parent)) {
+        parent.after(outer);
       }
     }
 
-    // Create new span at cursor
-    const span = createSpan();
-    span.appendChild(document.createTextNode('\u200B'));
-
+    // 2. Remove dead spans (ZWS-only, not the one the cursor is in)
+    const sel = window.getSelection();
+    let cursorSpan = null;
     if (sel.rangeCount) {
-      const range = sel.getRangeAt(0);
-      if (msgInput.contains(range.commonAncestorContainer)) {
-        range.collapse(false);
-        range.insertNode(span);
-        placeCursorIn(span);
-        return;
-      }
+      cursorSpan = findParentSpan(sel.getRangeAt(0).startContainer);
+    }
+    for (const span of Array.from(msgInput.querySelectorAll('span'))) {
+      if (span === cursorSpan) continue;
+      if (span.parentElement !== msgInput) continue;
+      if (isSpanEmpty(span)) span.remove();
     }
 
-    // Fallback: append at end
-    msgInput.appendChild(span);
-    placeCursorIn(span);
+    // 3. Merge adjacent spans with identical state
+    let child = msgInput.firstElementChild;
+    while (child) {
+      const next = child.nextElementSibling;
+      if (next && child.tagName === 'SPAN' && next.tagName === 'SPAN' &&
+          segmentState(child) === segmentState(next)) {
+        while (next.firstChild) child.appendChild(next.firstChild);
+        next.remove();
+        // Don't advance — check the same `child` against its new next sibling
+      } else {
+        child = next;
+      }
+    }
   }
 
   // --- Identity chips ---
@@ -143,6 +242,7 @@
         chip.classList.add('active');
       }
       ensureActiveSpan();
+      normalizeInput();
       msgInput.focus();
     });
   });
@@ -169,6 +269,7 @@
         btn.classList.toggle('active-' + tag, currentKnowledge[tag]);
       }
       ensureActiveSpan();
+      normalizeInput();
       msgInput.focus();
     });
   });
@@ -210,39 +311,36 @@
   function getSegments() {
     const segments = [];
 
-    function walk(node) {
+    function walk(node, inherited) {
       if (node.nodeType === Node.TEXT_NODE) {
         const text = node.textContent.replace(/\u200B/g, '');
         if (text) {
-          segments.push({ text: text, identity: null, format: null, plan: false, pin: false });
+          segments.push({
+            text: text,
+            identity: inherited.identity,
+            format: inherited.format,
+            plan: inherited.plan,
+            pin: inherited.pin,
+          });
         }
       } else if (node.nodeType === Node.ELEMENT_NODE) {
         if (node.tagName === 'BR') {
-          segments.push({ text: '\n', identity: null, format: null, plan: false, pin: false });
+          segments.push({ text: '\n', identity: inherited.identity, format: inherited.format, plan: inherited.plan, pin: inherited.pin });
         } else if (node.tagName === 'SPAN') {
-          const inner = [];
+          // Span's own data takes priority, fall back to inherited
+          const spanProps = {
+            identity: node.dataset.identity || inherited.identity,
+            format: node.dataset.format || inherited.format,
+            plan: node.dataset.plan === '1' || inherited.plan,
+            pin: node.dataset.pin === '1' || inherited.pin,
+          };
           for (const child of node.childNodes) {
-            if (child.nodeType === Node.TEXT_NODE) {
-              const t = child.textContent.replace(/\u200B/g, '');
-              if (t) inner.push(t);
-            } else if (child.nodeType === Node.ELEMENT_NODE && child.tagName === 'BR') {
-              inner.push('\n');
-            }
-          }
-          const text = inner.join('');
-          if (text) {
-            segments.push({
-              text: text,
-              identity: node.dataset.identity || null,
-              format: node.dataset.format || null,
-              plan: node.dataset.plan === '1',
-              pin: node.dataset.pin === '1',
-            });
+            walk(child, spanProps);
           }
         } else {
           // DIV/P from browser line wrapping — treat as block with trailing newline
           const isBlock = node.tagName === 'DIV' || node.tagName === 'P';
-          for (const child of node.childNodes) walk(child);
+          for (const child of node.childNodes) walk(child, inherited);
           if (isBlock) {
             segments.push({ text: '\n', identity: null, format: null, plan: false, pin: false });
           }
@@ -250,7 +348,8 @@
       }
     }
 
-    for (const child of msgInput.childNodes) walk(child);
+    const noProps = { identity: null, format: null, plan: false, pin: false };
+    for (const child of msgInput.childNodes) walk(child, noProps);
 
     // Merge adjacent segments with same properties
     const merged = [];
@@ -315,6 +414,7 @@
     ev.preventDefault();
     if (submitting) return;
 
+    normalizeInput();
     const segments = getSegments();
     const message = serializeSegments(segments);
     const hasImage = imageInput.files.length > 0;
