@@ -182,11 +182,26 @@
     document.execCommand('insertText', false, text);
   });
 
-  // Ctrl/Cmd+Enter = submit
+  // Enter handling: Ctrl/Cmd+Enter = submit, plain Enter = <br> (prevent Chrome <div> wrapping)
   msgInput.addEventListener('keydown', ev => {
-    if ((ev.ctrlKey || ev.metaKey) && ev.key === 'Enter') {
-      ev.preventDefault();
-      form.dispatchEvent(new Event('submit'));
+    if (ev.key === 'Enter') {
+      if (ev.ctrlKey || ev.metaKey) {
+        ev.preventDefault();
+        form.dispatchEvent(new Event('submit'));
+      } else {
+        ev.preventDefault();
+        const sel = window.getSelection();
+        if (sel.rangeCount) {
+          const range = sel.getRangeAt(0);
+          range.deleteContents();
+          const br = document.createElement('br');
+          range.insertNode(br);
+          range.setStartAfter(br);
+          range.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(range);
+        }
+      }
     }
   });
 
@@ -225,7 +240,12 @@
             });
           }
         } else {
+          // DIV/P from browser line wrapping — treat as block with trailing newline
+          const isBlock = node.tagName === 'DIV' || node.tagName === 'P';
           for (const child of node.childNodes) walk(child);
+          if (isBlock) {
+            segments.push({ text: '\n', identity: null, format: null, plan: false, pin: false });
+          }
         }
       }
     }
@@ -495,5 +515,6 @@
 
   // --- Init ---
   scrollToBottom();
+  msgInput.focus();
 
 })();

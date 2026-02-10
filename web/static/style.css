@@ -511,8 +511,9 @@ time {
 }
 
 .msg-input:empty::before {
-  content: '';
+  content: '...';
   color: var(--text-faint);
+  pointer-events: none;
 }
 
 /* Identity colors in the input */

@@ -17,7 +17,7 @@ $loginError = isset($_GET['login_error']) && $_GET['login_error'] === '1';
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="static/style.css">
+  <link rel="stylesheet" href="static/style.css?v=2">
 </head>
 <body>
 
@@ -84,7 +84,7 @@ $loginError = isset($_GET['login_error']) && $_GET['login_error'] === '1';
         <div class="input-row">
           <div class="input-wrap">
             <div id="msg-input" class="msg-input" contenteditable="true"
-                 role="textbox" aria-multiline="true" autofocus></div>
+                 role="textbox" aria-multiline="true"></div>
           </div>
         </div>
 
@@ -118,8 +118,8 @@ $loginError = isset($_GET['login_error']) && $_GET['login_error'] === '1';
   </div>
 
   <script src="https://unpkg.com/htmx.org@2.0.4" crossorigin="anonymous"></script>
-  <script src="static/space.js"></script>
-  <script src="static/chat.js"></script>
+  <script src="static/space.js?v=2"></script>
+  <script src="static/chat.js?v=2"></script>
 
 <?php endif; ?>
 
