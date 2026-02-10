@@ -164,19 +164,27 @@
       // Cursor at start — insert new span before as sibling
       parentSpan.before(newSpan);
     } else {
-      // Cursor in middle — normalize first, then extract trailing content
+      // Cursor in middle — normalize first, then re-query cursor position
       parentSpan.normalize();
+      // Re-query selection since normalize() may have merged text nodes
+      const freshSel = window.getSelection();
       const tailRange = document.createRange();
-      // Ensure we have a valid text node boundary
-      let splitNode = range.startContainer;
-      let splitOffset = range.startOffset;
+      let splitNode, splitOffset;
+      if (freshSel.rangeCount && parentSpan.contains(freshSel.getRangeAt(0).startContainer)) {
+        const fr = freshSel.getRangeAt(0);
+        splitNode = fr.startContainer;
+        splitOffset = fr.startOffset;
+      } else {
+        // Selection was lost — fall back to placing at end
+        parentSpan.after(newSpan);
+        placeCursorIn(newSpan);
+        return;
+      }
       if (splitNode === parentSpan) {
-        // Offset is a child index — find the actual text position
         if (splitOffset < parentSpan.childNodes.length) {
           splitNode = parentSpan.childNodes[splitOffset];
           splitOffset = 0;
         } else {
-          // At end — treat as afterText === '' case
           parentSpan.after(newSpan);
           placeCursorIn(newSpan);
           return;
@@ -219,6 +227,17 @@
       }
     }
 
+    // 1b. Unwrap browser-injected DIV/P elements
+    for (const child of Array.from(msgInput.childNodes)) {
+      if (child.nodeType === Node.ELEMENT_NODE &&
+          (child.tagName === 'DIV' || child.tagName === 'P')) {
+        const br = document.createElement('br');
+        child.before(br);
+        while (child.firstChild) child.before(child.firstChild);
+        child.remove();
+      }
+    }
+
     // 2. Remove dead spans (ZWS-only, not the one the cursor is in)
     const sel = window.getSelection();
     let cursorSpan = null;
@@ -244,10 +263,30 @@
         child = next;
       }
     }
+
+    // 4. Ensure cursor is still inside msgInput
+    const selCheck = window.getSelection();
+    if (selCheck.rangeCount && !msgInput.contains(selCheck.getRangeAt(0).startContainer)) {
+      const lastSpan = msgInput.querySelector('span:last-of-type');
+      if (lastSpan) placeCursorIn(lastSpan);
+    }
+  }
+
+  function insertNewlineBeforeTagSwitch() {
+    const sel = window.getSelection();
+    if (!sel.rangeCount) return;
+    const span = findParentSpan(sel.getRangeAt(0).startContainer);
+    if (!span) return;
+    const prev = span.previousSibling;
+    if (!prev) return;
+    if (prev.nodeName === 'BR') return;
+    if (prev.nodeType === Node.ELEMENT_NODE && prev.tagName === 'SPAN' && isSpanEmpty(prev)) return;
+    span.before(document.createElement('br'));
   }
 
   // --- Identity chips ---
   document.querySelectorAll('.identity-chip').forEach(chip => {
+    chip.addEventListener('mousedown', ev => ev.preventDefault());
     chip.addEventListener('click', () => {
       const val = chip.dataset.identity;
       if (currentIdentity === val) {
@@ -258,9 +297,10 @@
         currentIdentity = val;
         chip.classList.add('active');
       }
+      msgInput.focus();
       ensureActiveSpan();
       normalizeInput();
-      msgInput.focus();
+      insertNewlineBeforeTagSwitch();
     });
   });
 
@@ -268,6 +308,7 @@
   document.querySelectorAll('.tag-toggle').forEach(btn => {
     const tag = btn.dataset.tag;
 
+    btn.addEventListener('mousedown', ev => ev.preventDefault());
     btn.addEventListener('click', () => {
       if (FORMATS.includes(tag)) {
         if (currentFormat === tag) {
@@ -285,9 +326,10 @@
         currentKnowledge[tag] = !currentKnowledge[tag];
         btn.classList.toggle('active-' + tag, currentKnowledge[tag]);
       }
+      msgInput.focus();
       ensureActiveSpan();
       normalizeInput();
-      msgInput.focus();
+      insertNewlineBeforeTagSwitch();
     });
   });
 
@@ -313,11 +355,29 @@
     } else {
       const span = createSpan();
       span.textContent = text;
-      range.insertNode(span);
-      range.setStartAfter(span);
-      range.collapse(true);
+      if (parentSpan) {
+        // Split parent span at cursor to avoid nesting
+        const pasteRange = document.createRange();
+        pasteRange.setStart(range.startContainer, range.startOffset);
+        pasteRange.setEnd(parentSpan, parentSpan.childNodes.length);
+        const tail = pasteRange.extractContents();
+        const hasTail = tail.textContent.replace(/\u200B/g, '').length > 0;
+        parentSpan.after(span);
+        if (hasTail) {
+          const afterSpan = document.createElement('span');
+          afterSpan.className = parentSpan.className;
+          for (const key of Object.keys(parentSpan.dataset)) afterSpan.dataset[key] = parentSpan.dataset[key];
+          afterSpan.appendChild(tail);
+          span.after(afterSpan);
+        }
+      } else {
+        range.insertNode(span);
+      }
+      const newRange = document.createRange();
+      newRange.setStartAfter(span);
+      newRange.collapse(true);
       sel.removeAllRanges();
-      sel.addRange(range);
+      sel.addRange(newRange);
     }
     normalizeInput();
   });
@@ -336,6 +396,14 @@
           range.deleteContents();
           const br = document.createElement('br');
           range.insertNode(br);
+          // If br is at the end of its container, add a sentinel <br>
+          // so the browser renders the new blank line visually
+          if (!br.nextSibling ||
+              (br.nextSibling.nodeType === Node.TEXT_NODE &&
+               br.nextSibling.textContent.replace(/\u200B/g, '') === '' &&
+               !br.nextSibling.nextSibling)) {
+            br.parentNode.appendChild(document.createElement('br'));
+          }
           range.setStartAfter(br);
           range.collapse(true);
           sel.removeAllRanges();
@@ -401,6 +469,15 @@
         merged.push({ ...seg });
       }
     }
+
+    // Strip trailing newlines (from sentinel <br>)
+    while (merged.length > 0) {
+      const last = merged[merged.length - 1];
+      const trimmed = last.text.replace(/\n+$/, '');
+      if (trimmed === last.text) break;
+      if (trimmed === '') { merged.pop(); } else { last.text = trimmed; break; }
+    }
+
     return merged;
   }
 
