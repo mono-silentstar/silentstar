@@ -10,24 +10,27 @@ Order is inviolable:
   3. Self-State     — what I know (ambient.md)
   4. Working Memory — plans, pins, descs, patterns, thoughts, feelings
   5. Recalled       — lookup results from previous turn
-  6. Recent         — conversation history (say/do/narrate), pressure-decayed
+  6. Recent         — conversation history (say/do/narrate), FIFO pools
   7. Current Time   — right now
   8. Hot Context    — Mono's current message, verbatim
 
-The first two are static files. Self-State is one file. Working memory
-and conversation are shaped by decay and bounded by token budget.
-Hot context is untouched.
+The first two are static files. Self-State is one file.
+Working memory is shaped by decay and bounded by a hard cap.
+Conversation uses FIFO pool allocation — no decay, just recency.
 
-Two-phase budget:
-  Phase 1: Fill working memory. Determine fill ratio.
-  Phase 2: Apply pressure to conversation decay. Fill remaining budget.
+Budget (token hard caps):
+  Wake + Ambient:  ~2000  (file-loaded, informational)
+  Working Memory:   1500
+  Conversation:     5000  (1500 mono / 1500 say / 1000 do / 1000 flex)
+  Recall:           1000
+  Total:           ~8500 + activation + hot context
 """
 
 from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from pathlib import Path
 
 import re
@@ -36,20 +39,24 @@ from .decay import (
     ContextFragment,
     DecayParams,
     Persistence,
-    score,
     select_within_budget,
 )
 from .recall import RecallResult, NeighborResult
 from .schema import connect, DISPLAY_TAGS, ALL_TAGS
 
 
-# Budget defaults — these control the flexible sections.
+# Budget defaults — hard caps for each section.
 # Activation and self-state are full files, always included.
-DEFAULT_WM_BUDGET = 1000           # working memory (plans, pins, descs, etc.)
-DEFAULT_CONVERSATION_BUDGET = 1000 # recent say/do/narrate
-DEFAULT_RESERVE = 1500             # flex pool
-DEFAULT_RESERVE_WM_BIAS = 0.7     # 70% of reserve biased to working memory
+DEFAULT_WM_BUDGET = 1500           # working memory hard cap
 DEFAULT_RECALL_BUDGET = 1000       # recall results from previous turn
+
+# Conversation pool budgets — FIFO allocation, most recent first.
+# Each pool fills independently. Overflow spills to flex reserve.
+DEFAULT_MONO_POOL = 1500           # Mono's messages (all tags)
+DEFAULT_CLAUDE_SAY_POOL = 1500     # Claude's say content
+DEFAULT_CLAUDE_DO_POOL = 1000      # Claude's do + narrate content
+DEFAULT_FLEX_RESERVE = 1000        # overflow from any full pool
+# Hard cap: 1500 + 1500 + 1000 + 1000 = 5000 conversation tokens
 
 # Rough token estimation
 CHARS_PER_TOKEN = 4
@@ -70,6 +77,30 @@ WM_TYPE_TO_PERSISTENCE: dict[str, Persistence] = {
 
 
 @dataclass
+class ConversationBudget:
+    """Pool-based FIFO budget for conversation context.
+
+    Four pools, filled most-recent-first:
+      mono     — Mono's messages (any display tag)
+      say      — Claude's say content
+      do       — Claude's do + narrate content
+      flex     — overflow from any pool that hit its cap
+
+    A single event can split across pools — Claude's say goes to the
+    say pool while her do goes to the do pool. If a pool is full,
+    that piece tries flex. If flex is full, it's dropped.
+    """
+    mono_pool: int = DEFAULT_MONO_POOL
+    claude_say_pool: int = DEFAULT_CLAUDE_SAY_POOL
+    claude_do_pool: int = DEFAULT_CLAUDE_DO_POOL
+    flex_reserve: int = DEFAULT_FLEX_RESERVE
+
+    @property
+    def hard_cap(self) -> int:
+        return self.mono_pool + self.claude_say_pool + self.claude_do_pool + self.flex_reserve
+
+
+@dataclass
 class WakeConfig:
     """Everything the assembler needs."""
     db_path: Path
@@ -77,9 +108,7 @@ class WakeConfig:
     wake_context_image_path: Path
     ambient_path: Path
     wm_budget: int = DEFAULT_WM_BUDGET
-    conversation_budget: int = DEFAULT_CONVERSATION_BUDGET
-    reserve_budget: int = DEFAULT_RESERVE
-    reserve_wm_bias: float = DEFAULT_RESERVE_WM_BIAS
+    conversation: ConversationBudget = field(default_factory=ConversationBudget)
     recall_budget: int = DEFAULT_RECALL_BUDGET
     decay_params: DecayParams = field(default_factory=DecayParams)
 
@@ -172,7 +201,7 @@ def _load_working_memory(
     Load active working memory items, scored by type-specific decay.
 
     Returns (selected_fragments, fill_ratio).
-    Fill ratio is used to calculate pressure on conversation decay.
+    Fill ratio is informational — how full the WM budget is.
     """
     rows = conn.execute("""
         SELECT id, type, content, subject, actor, due,
@@ -232,16 +261,21 @@ def _load_working_memory(
 
 def _load_conversation(
     conn: sqlite3.Connection,
-    now: datetime,
-    current_turn: int,
-    token_budget: int,
-    params: DecayParams,
+    budget: ConversationBudget,
 ) -> list[ContextFragment]:
     """
-    Load recent conversation (say/do/narrate events only).
-    Params should already have pressure applied.
+    Load recent conversation using FIFO pool allocation.
+
+    Most recent events fill first. Each event's content is split by
+    tag category and allocated to the appropriate pool:
+      - Mono's messages → mono pool
+      - Claude's say → say pool
+      - Claude's do/narrate → do pool
+      - Overflow from any full pool → flex reserve
+
+    A single Claude event can have its say kept but do dropped (or
+    vice versa) if one pool fills before the other.
     """
-    # Pull recent events that have display tags
     rows = conn.execute("""
         SELECT e.id, e.ts, e.content, e.actor, e.image_path,
                GROUP_CONCAT(t.tag) as tags
@@ -253,39 +287,125 @@ def _load_conversation(
         LIMIT 200
     """).fetchall()
 
-    fragments = []
-    for i, row in enumerate(rows):
+    mono_remaining = budget.mono_pool
+    say_remaining = budget.claude_say_pool
+    do_remaining = budget.claude_do_pool
+    flex_remaining = budget.flex_reserve
+
+    selected = []
+
+    for row in rows:
         tags = (row["tags"] or "").split(",")
         tags = [t.strip() for t in tags if t.strip()]
 
         ts = datetime.fromisoformat(row["ts"]).replace(tzinfo=timezone.utc)
         actor = row["actor"] or ""
-
-        # Extract just the display content (say/do/narrate), not raw tags
-        content = _extract_display_content(row["content"], actor)
-        if not content:
-            continue
-
         img = row["image_path"] or None
-        tokens = _estimate_tokens(content)
-        if img:
-            tokens += IMAGE_TOKEN_COST
+        is_claude = (actor == "claude")
 
-        frag = ContextFragment(
-            content=content,
-            timestamp=ts,
-            turn_number=current_turn - i,
-            persistence=Persistence.CONVERSATION,
-            tags=tags,
-            source=f"event:{row['id']}",
-            image_path=img,
-            token_estimate=tokens,
-        )
-        fragments.append(frag)
+        if not is_claude:
+            # Mono's entire message → mono pool
+            content = _extract_display_content(row["content"], actor)
+            if not content:
+                continue
 
-    return select_within_budget(
-        fragments, now, current_turn, token_budget, params
-    )
+            tokens = _estimate_tokens(content)
+            if img:
+                tokens += IMAGE_TOKEN_COST
+
+            if tokens <= mono_remaining:
+                mono_remaining -= tokens
+            elif tokens <= flex_remaining:
+                flex_remaining -= tokens
+            else:
+                continue
+
+            selected.append(ContextFragment(
+                content=content,
+                timestamp=ts,
+                turn_number=0,
+                persistence=Persistence.CONVERSATION,
+                tags=tags,
+                source=f"event:{row['id']}",
+                image_path=img,
+                token_estimate=tokens,
+            ))
+        else:
+            # Claude — split content by tag category
+            raw = row["content"]
+            matches = _DISPLAY_TAG_RE.findall(raw)
+
+            say_parts = []
+            do_parts = []
+
+            for tag, content_text in matches:
+                text = content_text.strip()
+                if not text:
+                    continue
+                if tag == "say":
+                    say_parts.append(text)
+                elif tag in ("do", "narrate"):
+                    do_parts.append(text)
+
+            # Fallback: untagged Claude content treated as say
+            if not say_parts and not do_parts:
+                clean = _TAG_STRIP_RE.sub("", raw).strip()
+                if clean:
+                    say_parts.append(clean)
+
+            # Allocate say content
+            if say_parts:
+                say_text = " ".join(say_parts)
+                say_content = f"{actor}: {say_text}" if actor else say_text
+                say_tokens = _estimate_tokens(say_content)
+
+                allocated = False
+                if say_tokens <= say_remaining:
+                    say_remaining -= say_tokens
+                    allocated = True
+                elif say_tokens <= flex_remaining:
+                    flex_remaining -= say_tokens
+                    allocated = True
+
+                if allocated:
+                    selected.append(ContextFragment(
+                        content=say_content,
+                        timestamp=ts,
+                        turn_number=0,
+                        persistence=Persistence.CONVERSATION,
+                        tags=[t for t in tags if t == "say"],
+                        source=f"event:{row['id']}:say",
+                        token_estimate=say_tokens,
+                    ))
+
+            # Allocate do/narrate content
+            if do_parts:
+                do_text = " ".join(do_parts)
+                do_content = f"{actor}: {do_text}" if actor else do_text
+                do_tokens = _estimate_tokens(do_content)
+
+                allocated = False
+                if do_tokens <= do_remaining:
+                    do_remaining -= do_tokens
+                    allocated = True
+                elif do_tokens <= flex_remaining:
+                    flex_remaining -= do_tokens
+                    allocated = True
+
+                if allocated:
+                    selected.append(ContextFragment(
+                        content=do_content,
+                        timestamp=ts,
+                        turn_number=0,
+                        persistence=Persistence.CONVERSATION,
+                        tags=[t for t in tags if t in ("do", "narrate")],
+                        source=f"event:{row['id']}:do",
+                        token_estimate=do_tokens,
+                    ))
+
+    # Chronological order for natural reading
+    selected.sort(key=lambda f: f.timestamp)
+    return selected
 
 
 def _format_recall_results(
@@ -319,9 +439,9 @@ def assemble(
     image_path: str | None = None,
 ) -> WakePackage:
     """
-    Build the full context window. Two-phase:
-    1. Load working memory, determine fill ratio.
-    2. Apply pressure to conversation decay, load conversation.
+    Build the full context window.
+    Working memory: decay-scored within hard cap.
+    Conversation: FIFO pool allocation (mono / say / do / flex).
     """
     now = datetime.now(timezone.utc)
     conn = connect(config.db_path)
@@ -339,32 +459,13 @@ def assemble(
         # 3. Self-state — what I know
         self_state = _load_file(config.ambient_path)
 
-        # Phase 1: Working memory
-        # Base budget + available share of reserve
-        wm_max = config.wm_budget + int(config.reserve_budget * config.reserve_wm_bias)
-
-        working_memory, wm_fill_ratio = _load_working_memory(
-            conn, now, current_turn, wm_max, config.decay_params
+        # Working memory — decay-scored within hard cap
+        working_memory, _ = _load_working_memory(
+            conn, now, current_turn, config.wm_budget, config.decay_params
         )
 
-        wm_used = sum(f.token_estimate for f in working_memory)
-
-        # Phase 2: Conversation with pressure
-        # Conversation gets its base budget + whatever reserve WM didn't use
-        wm_reserve_used = max(0, wm_used - config.wm_budget)
-        reserve_remaining = config.reserve_budget - wm_reserve_used
-        conv_budget = config.conversation_budget + max(0, reserve_remaining)
-
-        # Apply pressure — working memory fullness compresses conversation
-        conv_params = DecayParams(
-            global_time_scale=config.decay_params.global_time_scale,
-            global_turn_scale=config.decay_params.global_turn_scale,
-            pressure=wm_fill_ratio,
-        )
-
-        conversation = _load_conversation(
-            conn, now, current_turn, conv_budget, conv_params
-        )
+        # Conversation — FIFO pool allocation
+        conversation = _load_conversation(conn, config.conversation)
 
         # Recall results from previous turn
         trimmed_recall = _format_recall_results(
