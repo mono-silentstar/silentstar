@@ -234,22 +234,66 @@
 
   function appendPending(jobId) {
     const div = document.createElement('div');
-    div.id = 'pending-turn';
     div.className = 'turn pending';
     div.innerHTML = '<div class="breathing"></div>';
-
-    // HTMX attributes for polling
-    div.setAttribute('hx-get', `api/status.php?id=${jobId}&format=html`);
-    div.setAttribute('hx-trigger', 'every 1.2s');
-    div.setAttribute('hx-swap', 'outerHTML');
-
     chatLog.appendChild(div);
     scrollToBottom();
 
-    // Tell HTMX to process the new element
-    if (window.htmx) {
-      htmx.process(div);
+    // Poll for completion via JSON — no HTMX, full control
+    const poll = setInterval(async () => {
+      try {
+        const resp = await fetch(`api/status.php?id=${jobId}&format=json`, {
+          credentials: 'same-origin',
+        });
+        const data = await resp.json();
+        if (!data || !data.ok) return;
+
+        if (data.status === 'done') {
+          clearInterval(poll);
+          div.remove();
+          if (Array.isArray(data.display) && data.display.length > 0) {
+            appendClaudeMessage(data.display, data.actor || 'claude');
+          }
+          // Empty display = secret/invisible. Breathing just disappears.
+        } else if (data.status === 'error') {
+          clearInterval(poll);
+          div.remove();
+          showError(data.error || 'something went wrong');
+        }
+      } catch {
+        // Network hiccup — keep trying
+      }
+    }, 1200);
+  }
+
+  function appendClaudeMessage(display, actor) {
+    const div = document.createElement('div');
+    div.className = 'turn';
+
+    let bodyHtml = '';
+    for (const span of display) {
+      if (!span.content) continue;
+      const cls = span.tag === 'do' ? 'display-do'
+                : span.tag === 'narrate' ? 'display-narrate'
+                : 'display-say';
+      bodyHtml += `<p class="${cls}">${esc(span.content)}</p>\n`;
     }
+
+    if (!bodyHtml.trim()) return;
+
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).toLowerCase();
+
+    div.innerHTML = `
+      <div class="msg claude">
+        <span class="actor" data-actor="${esc(actor)}">${esc(actor)}</span>
+        <div class="body">${bodyHtml}</div>
+        <div class="msg-meta"><time>${timeStr}</time></div>
+      </div>
+    `;
+
+    chatLog.appendChild(div);
+    scrollToBottom();
   }
 
   function showError(msg) {
@@ -290,17 +334,10 @@
   checkBridge();
 
   // --- HTMX events ---
-  // Auto-scroll when HTMX swaps in new content (completed responses)
+  // Scroll after history load and load-more
 
-  document.body.addEventListener('htmx:afterSwap', (ev) => {
+  document.body.addEventListener('htmx:afterSettle', () => {
     scrollToBottom();
-  });
-
-  // Scroll to bottom after initial history load
-  document.body.addEventListener('htmx:afterSettle', (ev) => {
-    if (ev.detail.target && ev.detail.target.id === 'chat-log') {
-      scrollToBottom();
-    }
   });
 
   // --- Init ---
