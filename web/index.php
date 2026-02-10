@@ -96,6 +96,9 @@ $loginError = isset($_GET['login_error']) && $_GET['login_error'] === '1';
         <input type="file" id="image-input" accept="image/*">
 
         <div class="actions-row">
+          <button type="button" class="tag-toggle" data-tag="do">do</button>
+          <button type="button" class="tag-toggle" data-tag="narrate">narrate</button>
+          <span class="tag-sep"></span>
           <button type="button" class="tag-toggle" data-tag="plan">plan</button>
           <button type="button" class="tag-toggle" data-tag="pin">pin</button>
           <button type="button" id="image-btn" class="image-btn" title="attach image">

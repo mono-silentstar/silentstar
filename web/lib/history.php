@@ -137,6 +137,7 @@ function ss_render_claude_msg(array $claude, string $ts): string
                 'narrate' => 'display-narrate',
                 default   => 'display-say',
             };
+            $content = ss_render_markdown($content);
             $bodyHtml .= "<p class=\"{$class}\">{$content}</p>\n";
         }
     }
@@ -157,10 +158,8 @@ function ss_render_claude_msg(array $claude, string $ts): string
 function ss_render_mono_body(string $text): string
 {
     // Render inline tags in Mono's message for display
-    // <plan>...</plan> → styled span, <pin>...</pin> → styled span
-    // Everything else is plain text
     $text = preg_replace_callback(
-        '/<(plan|pin)>(.*?)<\/\1>/s',
+        '/<(plan|pin|do|narrate)>(.*?)<\/\1>/s',
         static function (array $m): string {
             $tag = htmlspecialchars($m[1], ENT_QUOTES);
             $content = htmlspecialchars($m[2], ENT_QUOTES);
@@ -168,9 +167,16 @@ function ss_render_mono_body(string $text): string
         },
         $text
     );
-    // Remaining text: escape any leftover HTML but preserve newlines
-    // (the regex above already handled known tags)
-    return nl2br((string)$text);
+    $text = ss_render_markdown((string)$text);
+    return nl2br($text);
+}
+
+function ss_render_markdown(string $text): string
+{
+    // **bold** then *italic* — order matters
+    $text = preg_replace('/\*\*(.+?)\*\*/', '<strong>$1</strong>', $text);
+    $text = preg_replace('/\*(.+?)\*/', '<em>$1</em>', $text);
+    return $text;
 }
 
 function ss_format_time(string $ts): string

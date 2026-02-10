@@ -19,6 +19,8 @@
   --claude-accent:  #8b8ec8;
   --claude-glow:    rgba(139, 142, 200, 0.08);
 
+  --tag-do:         #c4967a;
+  --tag-narrate:    #8a9a7a;
   --tag-plan:       #b89a6a;
   --tag-pin:        #7a9db8;
 
@@ -319,6 +321,19 @@ html, body {
   display: inline;
 }
 
+.inline-do {
+  font-style: italic;
+  opacity: 0.85;
+  color: var(--text-soft);
+}
+
+.inline-narrate {
+  font-style: italic;
+  font-size: 13px;
+  opacity: 0.7;
+  color: var(--text-soft);
+}
+
 .msg-meta {
   display: flex;
   align-items: center;
@@ -524,6 +539,24 @@ time {
   border-color: var(--tag-pin);
   color: var(--tag-pin);
   background: rgba(122, 157, 184, 0.1);
+}
+
+.tag-toggle.active-do {
+  border-color: var(--tag-do);
+  color: var(--tag-do);
+  background: rgba(196, 150, 122, 0.1);
+}
+
+.tag-toggle.active-narrate {
+  border-color: var(--tag-narrate);
+  color: var(--tag-narrate);
+  background: rgba(138, 154, 122, 0.1);
+}
+
+.tag-sep {
+  width: 1px;
+  height: 16px;
+  background: var(--border);
 }
 
 .image-btn {

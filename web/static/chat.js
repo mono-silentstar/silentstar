@@ -212,9 +212,9 @@
 
     // Render inline tags for display
     let bodyHtml = esc(text)
-      .replace(/&lt;plan&gt;(.*?)&lt;\/plan&gt;/gs, '<span class="inline-tag inline-plan">$1</span>')
-      .replace(/&lt;pin&gt;(.*?)&lt;\/pin&gt;/gs, '<span class="inline-tag inline-pin">$1</span>');
-    bodyHtml = bodyHtml.replace(/\n/g, '<br>');
+      .replace(/&lt;(plan|pin|do|narrate)&gt;(.*?)&lt;\/\1&gt;/gs,
+        (_, tag, content) => `<span class="inline-tag inline-${tag}">${content}</span>`);
+    bodyHtml = md(bodyHtml).replace(/\n/g, '<br>');
 
     const now = new Date();
     const timeStr = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).toLowerCase();
@@ -276,7 +276,7 @@
       const cls = span.tag === 'do' ? 'display-do'
                 : span.tag === 'narrate' ? 'display-narrate'
                 : 'display-say';
-      bodyHtml += `<p class="${cls}">${esc(span.content)}</p>\n`;
+      bodyHtml += `<p class="${cls}">${md(esc(span.content))}</p>\n`;
     }
 
     if (!bodyHtml.trim()) return;
@@ -314,6 +314,13 @@
     const d = document.createElement('div');
     d.textContent = str;
     return d.innerHTML;
+  }
+
+  function md(html) {
+    // **bold** then *italic*
+    return html
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*(.+?)\*/g, '<em>$1</em>');
   }
 
   // --- Bridge status polling ---
