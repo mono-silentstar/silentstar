@@ -262,11 +262,11 @@ html, body {
   opacity: 0.7;
 }
 
-.actor[data-actor="hasuki"]  { color: #d4a07a; }
-.actor[data-actor="renki"]   { color: #a0b8c4; }
-.actor[data-actor="luna"]    { color: #b0c49a; }
-.actor[data-actor="chloe"]   { color: #c4a0b8; }
-.actor[data-actor="strah"]   { color: #8a8a9e; }
+.actor[data-actor="hasuki"]  { color: #c4a0d4; }
+.actor[data-actor="renki"]   { color: #7ab0d4; }
+.actor[data-actor="luna"]    { color: #b0b0bc; }
+.actor[data-actor="chloe"]   { color: #d4c478; }
+.actor[data-actor="strah"]   { color: #9a6b72; }
 .actor[data-actor="mono"]    { color: var(--mono-accent); }
 .actor[data-actor="claude"]  { color: var(--claude-accent); }
 .actor[data-actor="y'lhara"] { color: #a89cc4; }
@@ -459,10 +459,20 @@ time {
   color: var(--text-soft);
 }
 
-.identity-chip.active {
-  border-color: var(--mono-accent);
-  color: var(--mono-accent);
-  background: rgba(196, 168, 130, 0.08);
+.identity-chip.active[data-identity="hasuki"] {
+  border-color: #c4a0d4; color: #c4a0d4; background: rgba(196, 160, 212, 0.08);
+}
+.identity-chip.active[data-identity="renki"] {
+  border-color: #7ab0d4; color: #7ab0d4; background: rgba(122, 176, 212, 0.08);
+}
+.identity-chip.active[data-identity="luna"] {
+  border-color: #b0b0bc; color: #b0b0bc; background: rgba(176, 176, 188, 0.08);
+}
+.identity-chip.active[data-identity="chloe"] {
+  border-color: #d4c478; color: #d4c478; background: rgba(212, 196, 120, 0.08);
+}
+.identity-chip.active[data-identity="strah"] {
+  border-color: #9a6b72; color: #9a6b72; background: rgba(154, 107, 114, 0.08);
 }
 
 /* Text input */
@@ -489,19 +499,43 @@ time {
   font: inherit;
   font-size: 14px;
   line-height: 1.5;
-  resize: none;
   outline: none;
   transition: border-color 0.3s;
   overflow-y: auto;
+  word-wrap: break-word;
+  white-space: pre-wrap;
 }
 
 .msg-input:focus {
   border-color: rgba(255, 255, 255, 0.1);
 }
 
-.msg-input::placeholder {
+.msg-input:empty::before {
+  content: '';
   color: var(--text-faint);
 }
+
+/* Identity colors in the input */
+.input-id-hasuki { color: #c4a0d4; }
+.input-id-renki  { color: #7ab0d4; }
+.input-id-luna   { color: #b0b0bc; }
+.input-id-chloe  { color: #d4c478; }
+.input-id-strah  { color: #9a6b72; }
+
+/* Format styles in the input */
+.input-fmt-do      { font-style: italic; }
+.input-fmt-narrate { font-style: italic; opacity: 0.75; }
+
+/* Knowledge tag styles in the input */
+.input-tag-plan { border-bottom: 1px dashed var(--tag-plan); }
+.input-tag-pin  { border-bottom: 1px dashed var(--tag-pin); }
+
+/* Identity colors in chat display */
+.chat-id-hasuki { color: #c4a0d4; }
+.chat-id-renki  { color: #7ab0d4; }
+.chat-id-luna   { color: #b0b0bc; }
+.chat-id-chloe  { color: #d4c478; }
+.chat-id-strah  { color: #9a6b72; }
 
 /* Action buttons row */
 .actions-row {

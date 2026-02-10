@@ -1,8 +1,8 @@
 /*
  * chat.js — interaction layer
  *
- * Tag insertion, identity selection, image upload,
- * form submission, auto-scroll, bridge status polling.
+ * Rich contenteditable input with identity-colored text,
+ * format/knowledge buttons, image upload, bridge polling.
  */
 
 (function () {
@@ -24,73 +24,250 @@
 
   if (!form || !msgInput) return;
 
+  // --- Constants ---
+  const IDENTITIES = ['hasuki', 'renki', 'luna', 'chloe', 'strah'];
+  const FORMATS = ['do', 'narrate'];
+  const KNOWLEDGE = ['plan', 'pin'];
+  const ALL_TAGS = [...IDENTITIES, ...FORMATS, ...KNOWLEDGE];
+
   // --- State ---
-  let identity = null;   // current fronting identity, or null for "mono"
-  let tagState = {};      // { plan: false, pin: false }
+  let currentIdentity = null;
+  let currentFormat = null;
+  let currentKnowledge = { plan: false, pin: false };
   let bridgeOnline = false;
   let submitting = false;
+
+  // --- Contenteditable: span management ---
+
+  function createSpan() {
+    const span = document.createElement('span');
+    applyState(span);
+    return span;
+  }
+
+  function applyState(span) {
+    span.className = '';
+    delete span.dataset.identity;
+    delete span.dataset.format;
+    delete span.dataset.plan;
+    delete span.dataset.pin;
+
+    if (currentIdentity) {
+      span.dataset.identity = currentIdentity;
+      span.classList.add('input-id-' + currentIdentity);
+    }
+    if (currentFormat) {
+      span.dataset.format = currentFormat;
+      span.classList.add('input-fmt-' + currentFormat);
+    }
+    if (currentKnowledge.plan) {
+      span.dataset.plan = '1';
+      span.classList.add('input-tag-plan');
+    }
+    if (currentKnowledge.pin) {
+      span.dataset.pin = '1';
+      span.classList.add('input-tag-pin');
+    }
+  }
+
+  function isSpanEmpty(span) {
+    return span.textContent.replace(/\u200B/g, '').trim() === '';
+  }
+
+  function placeCursorIn(span) {
+    const sel = window.getSelection();
+    const range = document.createRange();
+    if (span.lastChild) {
+      range.setStartAfter(span.lastChild);
+    } else {
+      range.setStart(span, 0);
+    }
+    range.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+
+  function ensureActiveSpan() {
+    const sel = window.getSelection();
+
+    if (sel.rangeCount) {
+      const range = sel.getRangeAt(0);
+      let node = range.startContainer;
+
+      // Find parent span if we're in a text node
+      let parentSpan = null;
+      if (node.nodeType === Node.TEXT_NODE && node.parentElement &&
+          node.parentElement !== msgInput && node.parentElement.tagName === 'SPAN') {
+        parentSpan = node.parentElement;
+      } else if (node.nodeType === Node.ELEMENT_NODE && node.tagName === 'SPAN' &&
+                 node.parentElement === msgInput) {
+        parentSpan = node;
+      }
+
+      // If we're in an empty span, just update it
+      if (parentSpan && isSpanEmpty(parentSpan)) {
+        applyState(parentSpan);
+        return;
+      }
+    }
+
+    // Create new span at cursor
+    const span = createSpan();
+    span.appendChild(document.createTextNode('\u200B'));
+
+    if (sel.rangeCount) {
+      const range = sel.getRangeAt(0);
+      if (msgInput.contains(range.commonAncestorContainer)) {
+        range.collapse(false);
+        range.insertNode(span);
+        placeCursorIn(span);
+        return;
+      }
+    }
+
+    // Fallback: append at end
+    msgInput.appendChild(span);
+    placeCursorIn(span);
+  }
 
   // --- Identity chips ---
   document.querySelectorAll('.identity-chip').forEach(chip => {
     chip.addEventListener('click', () => {
       const val = chip.dataset.identity;
-      if (identity === val) {
-        // Deselect
-        identity = null;
+      if (currentIdentity === val) {
+        currentIdentity = null;
         chip.classList.remove('active');
       } else {
-        // Select this one, deselect others
         document.querySelectorAll('.identity-chip').forEach(c => c.classList.remove('active'));
-        identity = val;
+        currentIdentity = val;
         chip.classList.add('active');
       }
-    });
-  });
-
-  // --- Tag toggles ---
-  document.querySelectorAll('.tag-toggle').forEach(btn => {
-    const tag = btn.dataset.tag;
-    tagState[tag] = false;
-
-    btn.addEventListener('click', () => {
-      if (tagState[tag]) {
-        // Close tag
-        insertAtCursor(`</${tag}>`);
-        tagState[tag] = false;
-        btn.classList.remove(`active-${tag}`);
-      } else {
-        // Open tag
-        insertAtCursor(`<${tag}>`);
-        tagState[tag] = true;
-        btn.classList.add(`active-${tag}`);
-      }
+      ensureActiveSpan();
       msgInput.focus();
     });
   });
 
-  function insertAtCursor(text) {
-    const start = msgInput.selectionStart;
-    const end = msgInput.selectionEnd;
-    const before = msgInput.value.substring(0, start);
-    const after = msgInput.value.substring(end);
-    msgInput.value = before + text + after;
-    const newPos = start + text.length;
-    msgInput.setSelectionRange(newPos, newPos);
-    autoResize();
+  // --- Format & knowledge buttons ---
+  document.querySelectorAll('.tag-toggle').forEach(btn => {
+    const tag = btn.dataset.tag;
+
+    btn.addEventListener('click', () => {
+      if (FORMATS.includes(tag)) {
+        if (currentFormat === tag) {
+          currentFormat = null;
+          btn.classList.remove('active-' + tag);
+        } else {
+          FORMATS.forEach(f => {
+            const other = document.querySelector('.tag-toggle[data-tag="' + f + '"]');
+            if (other) other.classList.remove('active-' + f);
+          });
+          currentFormat = tag;
+          btn.classList.add('active-' + tag);
+        }
+      } else if (KNOWLEDGE.includes(tag)) {
+        currentKnowledge[tag] = !currentKnowledge[tag];
+        btn.classList.toggle('active-' + tag, currentKnowledge[tag]);
+      }
+      ensureActiveSpan();
+      msgInput.focus();
+    });
+  });
+
+  // --- Input event handlers ---
+
+  // Strip paste to plain text
+  msgInput.addEventListener('paste', ev => {
+    ev.preventDefault();
+    const text = (ev.clipboardData || window.clipboardData).getData('text/plain');
+    document.execCommand('insertText', false, text);
+  });
+
+  // Ctrl/Cmd+Enter = submit
+  msgInput.addEventListener('keydown', ev => {
+    if ((ev.ctrlKey || ev.metaKey) && ev.key === 'Enter') {
+      ev.preventDefault();
+      form.dispatchEvent(new Event('submit'));
+    }
+  });
+
+  // --- Serialization: contenteditable → tagged text + segments ---
+
+  function getSegments() {
+    const segments = [];
+
+    function walk(node) {
+      if (node.nodeType === Node.TEXT_NODE) {
+        const text = node.textContent.replace(/\u200B/g, '');
+        if (text) {
+          segments.push({ text: text, identity: null, format: null, plan: false, pin: false });
+        }
+      } else if (node.nodeType === Node.ELEMENT_NODE) {
+        if (node.tagName === 'BR') {
+          segments.push({ text: '\n', identity: null, format: null, plan: false, pin: false });
+        } else if (node.tagName === 'SPAN') {
+          const inner = [];
+          for (const child of node.childNodes) {
+            if (child.nodeType === Node.TEXT_NODE) {
+              const t = child.textContent.replace(/\u200B/g, '');
+              if (t) inner.push(t);
+            } else if (child.nodeType === Node.ELEMENT_NODE && child.tagName === 'BR') {
+              inner.push('\n');
+            }
+          }
+          const text = inner.join('');
+          if (text) {
+            segments.push({
+              text: text,
+              identity: node.dataset.identity || null,
+              format: node.dataset.format || null,
+              plan: node.dataset.plan === '1',
+              pin: node.dataset.pin === '1',
+            });
+          }
+        } else {
+          for (const child of node.childNodes) walk(child);
+        }
+      }
+    }
+
+    for (const child of msgInput.childNodes) walk(child);
+
+    // Merge adjacent segments with same properties
+    const merged = [];
+    for (const seg of segments) {
+      const prev = merged[merged.length - 1];
+      if (prev && prev.identity === seg.identity && prev.format === seg.format &&
+          prev.plan === seg.plan && prev.pin === seg.pin) {
+        prev.text += seg.text;
+      } else {
+        merged.push({ ...seg });
+      }
+    }
+    return merged;
   }
 
-  // --- Auto-resize textarea ---
-  function autoResize() {
-    msgInput.style.height = 'auto';
-    msgInput.style.height = Math.min(msgInput.scrollHeight, 200) + 'px';
+  function serializeSegments(segments) {
+    let result = '';
+    for (const seg of segments) {
+      let t = seg.text;
+      if (seg.format) t = '<' + seg.format + '>' + t + '</' + seg.format + '>';
+      if (seg.plan) t = '<plan>' + t + '</plan>';
+      if (seg.pin) t = '<pin>' + t + '</pin>';
+      if (seg.identity) t = '<' + seg.identity + '>' + t + '</' + seg.identity + '>';
+      result += t;
+    }
+    return result.trim();
   }
 
-  msgInput.addEventListener('input', autoResize);
+  function getPrimaryIdentity(segments) {
+    for (const seg of segments) {
+      if (seg.identity) return seg.identity;
+    }
+    return currentIdentity;
+  }
 
   // --- Image upload ---
-  imageBtn.addEventListener('click', () => {
-    imageInput.click();
-  });
+  imageBtn.addEventListener('click', () => imageInput.click());
 
   imageInput.addEventListener('change', () => {
     const file = imageInput.files[0];
@@ -103,130 +280,116 @@
     }
   });
 
-  removeImage.addEventListener('click', () => {
-    clearImage();
-  });
+  removeImage.addEventListener('click', () => clearImage());
 
   function clearImage() {
     imageInput.value = '';
     imageBtn.classList.remove('has-file');
     imagePreview.classList.remove('visible');
-    if (previewImg.src.startsWith('blob:')) {
-      URL.revokeObjectURL(previewImg.src);
-    }
+    if (previewImg.src.startsWith('blob:')) URL.revokeObjectURL(previewImg.src);
     previewImg.src = '';
   }
 
   // --- Form submission ---
-  form.addEventListener('submit', async (ev) => {
+  form.addEventListener('submit', async ev => {
     ev.preventDefault();
     if (submitting) return;
 
-    // Close any open tags
-    for (const [tag, open] of Object.entries(tagState)) {
-      if (open) {
-        msgInput.value += `</${tag}>`;
-        tagState[tag] = false;
-        const btn = document.querySelector(`.tag-toggle[data-tag="${tag}"]`);
-        if (btn) btn.classList.remove(`active-${tag}`);
-      }
-    }
-
-    const message = msgInput.value.trim();
+    const segments = getSegments();
+    const message = serializeSegments(segments);
     const hasImage = imageInput.files.length > 0;
 
     if (!message && !hasImage) return;
-
-    if (!bridgeOnline) {
-      showError('bridge offline');
-      return;
-    }
+    if (!bridgeOnline) { showError('bridge offline'); return; }
 
     submitting = true;
     sendBtn.disabled = true;
 
-    const fd = new FormData();
-    fd.append('message', message);
-    if (identity) fd.append('actor', identity);
-    // Extract tags that were used in the message
+    const actor = getPrimaryIdentity(segments);
     const usedTags = [];
     if (message.includes('<plan>')) usedTags.push('plan');
     if (message.includes('<pin>')) usedTags.push('pin');
+
+    const fd = new FormData();
+    fd.append('message', message);
+    if (actor) fd.append('actor', actor);
     usedTags.forEach(t => fd.append('tags[]', t));
     if (hasImage) fd.append('image', imageInput.files[0]);
 
     try {
-      const resp = await fetch('api/submit.php', {
-        method: 'POST',
-        body: fd,
-        credentials: 'same-origin',
-      });
+      const resp = await fetch('api/submit.php', { method: 'POST', body: fd, credentials: 'same-origin' });
       const data = await resp.json();
 
-      if (!data || !data.ok) {
-        showError(data?.error || 'submit failed');
-        return;
-      }
+      if (!data || !data.ok) { showError(data?.error || 'submit failed'); return; }
 
-      // Show Mono's message immediately
-      appendMonoMessage(message, identity, usedTags, hasImage ? imageInput.files[0] : null);
+      appendMonoMessage(segments, actor, usedTags, hasImage ? imageInput.files[0] : null);
 
-      // Clear input
-      msgInput.value = '';
-      autoResize();
+      // Clear input and reset state
+      msgInput.innerHTML = '';
       clearImage();
+      currentFormat = null;
+      FORMATS.forEach(f => {
+        const b = document.querySelector('.tag-toggle[data-tag="' + f + '"]');
+        if (b) b.classList.remove('active-' + f);
+      });
+      KNOWLEDGE.forEach(k => {
+        currentKnowledge[k] = false;
+        const b = document.querySelector('.tag-toggle[data-tag="' + k + '"]');
+        if (b) b.classList.remove('active-' + k);
+      });
 
-      // Start polling for response
       appendPending(data.job_id);
 
-    } catch (err) {
-      showError('connection failed');
-    } finally {
-      submitting = false;
-      sendBtn.disabled = false;
-    }
-  });
-
-  // Ctrl+Enter / Cmd+Enter to send
-  msgInput.addEventListener('keydown', (ev) => {
-    if ((ev.ctrlKey || ev.metaKey) && ev.key === 'Enter') {
-      ev.preventDefault();
-      form.dispatchEvent(new Event('submit'));
-    }
+    } catch { showError('connection failed'); }
+    finally { submitting = false; sendBtn.disabled = false; }
   });
 
   // --- Rendering ---
 
-  function appendMonoMessage(text, actor, tags, imageFile) {
+  function renderSegmentsHtml(segments) {
+    let html = '';
+    for (const seg of segments) {
+      let text = md(esc(seg.text));
+      const classes = [];
+      if (seg.identity) classes.push('chat-id-' + seg.identity);
+      if (seg.format === 'do') classes.push('inline-do');
+      if (seg.format === 'narrate') classes.push('inline-narrate');
+      if (seg.plan) classes.push('inline-tag inline-plan');
+      if (seg.pin) classes.push('inline-tag inline-pin');
+
+      if (classes.length > 0) {
+        html += '<span class="' + classes.join(' ') + '">' + text + '</span>';
+      } else {
+        html += text;
+      }
+    }
+    return html.replace(/\n/g, '<br>');
+  }
+
+  function appendMonoMessage(segments, actor, tags, imageFile) {
     const div = document.createElement('div');
     div.className = 'turn';
 
     const actorName = actor || 'mono';
-    const tagPills = tags.map(t => `<span class="tag-pill">${esc(t)}</span>`).join('');
+    const tagPills = tags.map(t => '<span class="tag-pill">' + esc(t) + '</span>').join('');
 
     let imageHtml = '';
     if (imageFile) {
       const url = URL.createObjectURL(imageFile);
-      imageHtml = `<div class="msg-image"><img src="${url}" alt="" loading="lazy"></div>`;
+      imageHtml = '<div class="msg-image"><img src="' + url + '" alt="" loading="lazy"></div>';
     }
 
-    // Render inline tags for display
-    let bodyHtml = esc(text)
-      .replace(/&lt;(plan|pin|do|narrate)&gt;(.*?)&lt;\/\1&gt;/gs,
-        (_, tag, content) => `<span class="inline-tag inline-${tag}">${content}</span>`);
-    bodyHtml = md(bodyHtml).replace(/\n/g, '<br>');
-
+    const bodyHtml = renderSegmentsHtml(segments);
     const now = new Date();
     const timeStr = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).toLowerCase();
 
-    div.innerHTML = `
-      <div class="msg mono">
-        <span class="actor" data-actor="${esc(actorName)}">${esc(actorName)}</span>
-        ${imageHtml}
-        <div class="body">${bodyHtml}</div>
-        <div class="msg-meta">${tagPills}<time>${timeStr}</time></div>
-      </div>
-    `;
+    div.innerHTML =
+      '<div class="msg mono">' +
+        '<span class="actor" data-actor="' + esc(actorName) + '">' + esc(actorName) + '</span>' +
+        imageHtml +
+        '<div class="body">' + bodyHtml + '</div>' +
+        '<div class="msg-meta">' + tagPills + '<time>' + timeStr + '</time></div>' +
+      '</div>';
 
     chatLog.appendChild(div);
     scrollToBottom();
@@ -239,12 +402,9 @@
     chatLog.appendChild(div);
     scrollToBottom();
 
-    // Poll for completion via JSON — no HTMX, full control
     const poll = setInterval(async () => {
       try {
-        const resp = await fetch(`api/status.php?id=${jobId}&format=json`, {
-          credentials: 'same-origin',
-        });
+        const resp = await fetch('api/status.php?id=' + jobId + '&format=json', { credentials: 'same-origin' });
         const data = await resp.json();
         if (!data || !data.ok) return;
 
@@ -254,15 +414,12 @@
           if (Array.isArray(data.display) && data.display.length > 0) {
             appendClaudeMessage(data.display, data.actor || 'claude');
           }
-          // Empty display = secret/invisible. Breathing just disappears.
         } else if (data.status === 'error') {
           clearInterval(poll);
           div.remove();
           showError(data.error || 'something went wrong');
         }
-      } catch {
-        // Network hiccup — keep trying
-      }
+      } catch {}
     }, 1200);
   }
 
@@ -276,7 +433,7 @@
       const cls = span.tag === 'do' ? 'display-do'
                 : span.tag === 'narrate' ? 'display-narrate'
                 : 'display-say';
-      bodyHtml += `<p class="${cls}">${md(esc(span.content))}</p>\n`;
+      bodyHtml += '<p class="' + cls + '">' + md(esc(span.content)) + '</p>\n';
     }
 
     if (!bodyHtml.trim()) return;
@@ -284,13 +441,12 @@
     const now = new Date();
     const timeStr = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).toLowerCase();
 
-    div.innerHTML = `
-      <div class="msg claude">
-        <span class="actor" data-actor="${esc(actor)}">${esc(actor)}</span>
-        <div class="body">${bodyHtml}</div>
-        <div class="msg-meta"><time>${timeStr}</time></div>
-      </div>
-    `;
+    div.innerHTML =
+      '<div class="msg claude">' +
+        '<span class="actor" data-actor="' + esc(actor) + '">' + esc(actor) + '</span>' +
+        '<div class="body">' + bodyHtml + '</div>' +
+        '<div class="msg-meta"><time>' + timeStr + '</time></div>' +
+      '</div>';
 
     chatLog.appendChild(div);
     scrollToBottom();
@@ -299,15 +455,13 @@
   function showError(msg) {
     const div = document.createElement('div');
     div.className = 'turn error-turn';
-    div.innerHTML = `<p class="error-msg">${esc(msg)}</p>`;
+    div.innerHTML = '<p class="error-msg">' + esc(msg) + '</p>';
     chatLog.appendChild(div);
     scrollToBottom();
   }
 
   function scrollToBottom() {
-    requestAnimationFrame(() => {
-      chatArea.scrollTop = chatArea.scrollHeight;
-    });
+    requestAnimationFrame(() => { chatArea.scrollTop = chatArea.scrollHeight; });
   }
 
   function esc(str) {
@@ -317,22 +471,18 @@
   }
 
   function md(html) {
-    // **bold** then *italic*
     return html
       .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
       .replace(/\*(.+?)\*/g, '<em>$1</em>');
   }
 
   // --- Bridge status polling ---
-
   async function checkBridge() {
     try {
       const resp = await fetch('api/bridge_state.php', { credentials: 'same-origin' });
       const data = await resp.json();
       bridgeOnline = !!(data && data.ok && data.online);
-    } catch {
-      bridgeOnline = false;
-    }
+    } catch { bridgeOnline = false; }
     bridgeDot.classList.toggle('online', bridgeOnline);
     bridgeLabel.textContent = bridgeOnline ? 'connected' : 'offline';
   }
@@ -341,15 +491,9 @@
   checkBridge();
 
   // --- HTMX events ---
-  // Scroll after history load and load-more
-
-  document.body.addEventListener('htmx:afterSettle', () => {
-    scrollToBottom();
-  });
+  document.body.addEventListener('htmx:afterSettle', () => scrollToBottom());
 
   // --- Init ---
-
-  // Scroll to bottom on load (after history loads)
   scrollToBottom();
 
 })();

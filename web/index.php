@@ -83,8 +83,8 @@ $loginError = isset($_GET['login_error']) && $_GET['login_error'] === '1';
       <form id="chat-form" enctype="multipart/form-data">
         <div class="input-row">
           <div class="input-wrap">
-            <textarea id="msg-input" class="msg-input" rows="1"
-                      autocomplete="off" autofocus></textarea>
+            <div id="msg-input" class="msg-input" contenteditable="true"
+                 role="textbox" aria-multiline="true" autofocus></div>
           </div>
         </div>
 

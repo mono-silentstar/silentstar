@@ -84,7 +84,7 @@ function ss_render_turn(array $entry): string
 function ss_render_mono_msg(array $mono, string $ts): string
 {
     $actor = htmlspecialchars((string)($mono['actor'] ?? 'mono'), ENT_QUOTES);
-    $text = htmlspecialchars((string)($mono['text'] ?? ''), ENT_QUOTES);
+    $rawText = (string)($mono['text'] ?? '');
     $tags = $mono['tags'] ?? [];
     $image = $mono['image'] ?? null;
     $time = ss_format_time($ts);
@@ -104,7 +104,8 @@ function ss_render_mono_msg(array $mono, string $ts): string
     }
 
     // Process text: convert inline tags to styled spans for display
-    $bodyHtml = ss_render_mono_body($text);
+    // Pass raw text — ss_render_mono_body handles escaping
+    $bodyHtml = ss_render_mono_body($rawText);
 
     return <<<HTML
     <div class="turn">
@@ -157,18 +158,99 @@ function ss_render_claude_msg(array $claude, string $ts): string
 
 function ss_render_mono_body(string $text): string
 {
-    // Render inline tags in Mono's message for display
-    $text = preg_replace_callback(
-        '/<(plan|pin|do|narrate)>(.*?)<\/\1>/s',
-        static function (array $m): string {
-            $tag = htmlspecialchars($m[1], ENT_QUOTES);
-            $content = htmlspecialchars($m[2], ENT_QUOTES);
-            return "<span class=\"inline-tag inline-{$tag}\">{$content}</span>";
-        },
-        $text
-    );
-    $text = ss_render_markdown((string)$text);
-    return nl2br($text);
+    $segments = ss_parse_segments($text);
+    return ss_render_segments($segments);
+}
+
+/**
+ * Parse tagged message text into structured segments.
+ * Handles identity tags (outermost), knowledge tags, format tags.
+ */
+function ss_parse_segments(string $text): array
+{
+    $identities = ['hasuki', 'renki', 'luna', 'chloe', 'strah'];
+    $formats = ['do', 'narrate'];
+    $knowledge = ['plan', 'pin'];
+    $allTags = array_merge($identities, $formats, $knowledge);
+
+    $segments = [];
+    $pos = 0;
+    $len = strlen($text);
+    $stack = [];
+    $buffer = '';
+
+    while ($pos < $len) {
+        if ($text[$pos] === '<') {
+            $isClosing = ($pos + 1 < $len && $text[$pos + 1] === '/');
+            $tagStart = $isClosing ? $pos + 2 : $pos + 1;
+            $tagEnd = strpos($text, '>', $tagStart);
+
+            if ($tagEnd !== false) {
+                $tagName = substr($text, $tagStart, $tagEnd - $tagStart);
+
+                if (in_array($tagName, $allTags, true)) {
+                    if ($buffer !== '') {
+                        $seg = ['text' => $buffer, 'identity' => null, 'format' => null, 'plan' => false, 'pin' => false];
+                        foreach ($stack as $t) {
+                            if (in_array($t, $identities, true)) $seg['identity'] = $t;
+                            elseif (in_array($t, $formats, true)) $seg['format'] = $t;
+                            elseif ($t === 'plan') $seg['plan'] = true;
+                            elseif ($t === 'pin') $seg['pin'] = true;
+                        }
+                        $segments[] = $seg;
+                        $buffer = '';
+                    }
+                    if ($isClosing) {
+                        $idx = array_search($tagName, array_reverse($stack, true), true);
+                        if ($idx !== false) array_splice($stack, $idx, 1);
+                    } else {
+                        $stack[] = $tagName;
+                    }
+                    $pos = $tagEnd + 1;
+                    continue;
+                }
+            }
+        }
+        $buffer .= $text[$pos];
+        $pos++;
+    }
+
+    if ($buffer !== '') {
+        $seg = ['text' => $buffer, 'identity' => null, 'format' => null, 'plan' => false, 'pin' => false];
+        foreach ($stack as $t) {
+            if (in_array($t, $identities, true)) $seg['identity'] = $t;
+            elseif (in_array($t, $formats, true)) $seg['format'] = $t;
+            elseif ($t === 'plan') $seg['plan'] = true;
+            elseif ($t === 'pin') $seg['pin'] = true;
+        }
+        $segments[] = $seg;
+    }
+
+    return $segments;
+}
+
+function ss_render_segments(array $segments): string
+{
+    $html = '';
+    foreach ($segments as $seg) {
+        $text = htmlspecialchars($seg['text'], ENT_QUOTES);
+        $text = ss_render_markdown($text);
+
+        $classes = [];
+        if ($seg['identity']) $classes[] = 'chat-id-' . $seg['identity'];
+        if ($seg['format'] === 'do') $classes[] = 'inline-do';
+        if ($seg['format'] === 'narrate') $classes[] = 'inline-narrate';
+        if ($seg['plan']) $classes[] = 'inline-tag inline-plan';
+        if ($seg['pin']) $classes[] = 'inline-tag inline-pin';
+
+        if (!empty($classes)) {
+            $cls = implode(' ', $classes);
+            $html .= "<span class=\"{$cls}\">{$text}</span>";
+        } else {
+            $html .= $text;
+        }
+    }
+    return nl2br($html);
 }
 
 function ss_render_markdown(string $text): string
