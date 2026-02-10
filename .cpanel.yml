@@ -1,7 +1,7 @@
 ---
 deployment:
   tasks:
-    - export DEPLOYPATH=/home/$USER/public_html/silentstar
+    - export DEPLOYPATH=/home/monomeuk/public_html/silentstar
     - mkdir -p $DEPLOYPATH
     - /bin/cp -R web/* $DEPLOYPATH/
     - /bin/cp -R web/.htaccess $DEPLOYPATH/
