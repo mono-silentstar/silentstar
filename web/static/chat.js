@@ -35,6 +35,7 @@
   let currentKnowledge = { plan: false, pin: false };
   let bridgeOnline = false;
   let submitting = false;
+  let pollIntervals = [];
 
   // --- Contenteditable: span management ---
 
@@ -163,9 +164,25 @@
       // Cursor at start — insert new span before as sibling
       parentSpan.before(newSpan);
     } else {
-      // Cursor in middle — extract trailing content into a clone span
+      // Cursor in middle — normalize first, then extract trailing content
+      parentSpan.normalize();
       const tailRange = document.createRange();
-      tailRange.setStart(range.startContainer, range.startOffset);
+      // Ensure we have a valid text node boundary
+      let splitNode = range.startContainer;
+      let splitOffset = range.startOffset;
+      if (splitNode === parentSpan) {
+        // Offset is a child index — find the actual text position
+        if (splitOffset < parentSpan.childNodes.length) {
+          splitNode = parentSpan.childNodes[splitOffset];
+          splitOffset = 0;
+        } else {
+          // At end — treat as afterText === '' case
+          parentSpan.after(newSpan);
+          placeCursorIn(newSpan);
+          return;
+        }
+      }
+      tailRange.setStart(splitNode, splitOffset);
       tailRange.setEnd(parentSpan, parentSpan.childNodes.length);
       const tailFragment = tailRange.extractContents();
 
@@ -280,7 +297,29 @@
   msgInput.addEventListener('paste', ev => {
     ev.preventDefault();
     const text = (ev.clipboardData || window.clipboardData).getData('text/plain');
-    document.execCommand('insertText', false, text);
+    if (!text) return;
+    const sel = window.getSelection();
+    if (!sel.rangeCount) return;
+    const range = sel.getRangeAt(0);
+    range.deleteContents();
+    const parentSpan = findParentSpan(range.startContainer);
+    if (parentSpan && stateMatches(parentSpan)) {
+      const textNode = document.createTextNode(text);
+      range.insertNode(textNode);
+      range.setStartAfter(textNode);
+      range.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    } else {
+      const span = createSpan();
+      span.textContent = text;
+      range.insertNode(span);
+      range.setStartAfter(span);
+      range.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+    normalizeInput();
   });
 
   // Enter handling: Ctrl/Cmd+Enter = submit, plain Enter = <br> (prevent Chrome <div> wrapping)
@@ -419,7 +458,7 @@
     const message = serializeSegments(segments);
     const hasImage = imageInput.files.length > 0;
 
-    if (!message && !hasImage) return;
+    if ((!message || !message.trim()) && !hasImage) return;
     if (!bridgeOnline) { showError('bridge offline'); return; }
 
     submitting = true;
@@ -457,6 +496,8 @@
         const b = document.querySelector('.tag-toggle[data-tag="' + k + '"]');
         if (b) b.classList.remove('active-' + k);
       });
+      currentIdentity = null;
+      document.querySelectorAll('.identity-chip').forEach(c => c.classList.remove('active'));
 
       appendPending(data.job_id);
 
@@ -522,6 +563,7 @@
     chatLog.appendChild(div);
     scrollToBottom();
 
+    let pollErrors = 0;
     const poll = setInterval(async () => {
       try {
         const resp = await fetch('api/status.php?id=' + jobId + '&format=json', { credentials: 'same-origin' });
@@ -539,8 +581,16 @@
           div.remove();
           showError(data.error || 'something went wrong');
         }
-      } catch {}
+      } catch {
+        pollErrors++;
+        if (pollErrors >= 5) {
+          clearInterval(poll);
+          div.remove();
+          showError('lost connection');
+        }
+      }
     }, 1200);
+    pollIntervals.push(poll);
   }
 
   function appendClaudeMessage(display, actor) {
@@ -607,14 +657,24 @@
     bridgeLabel.textContent = bridgeOnline ? 'connected' : 'offline';
   }
 
-  setInterval(checkBridge, 3000);
+  const bridgePollMs = ('ontouchstart' in window || navigator.maxTouchPoints > 0) ? 8000 : 3000;
+  setInterval(checkBridge, bridgePollMs);
   checkBridge();
 
   // --- HTMX events ---
-  document.body.addEventListener('htmx:afterSettle', () => scrollToBottom());
+  document.body.addEventListener('htmx:afterSettle', () => {
+    if (chatArea.scrollHeight - chatArea.scrollTop - chatArea.clientHeight < 100) {
+      scrollToBottom();
+    }
+  });
+
+  window.addEventListener('beforeunload', () => {
+    pollIntervals.forEach(id => clearInterval(id));
+  });
 
   // --- Init ---
   scrollToBottom();
   msgInput.focus();
+  if (sendBtn) sendBtn.title = 'Send (Ctrl+Enter)';
 
 })();

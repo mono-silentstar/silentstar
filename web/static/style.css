@@ -254,7 +254,7 @@ html, body {
 
 .actor {
   display: inline-block;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: lowercase;
@@ -455,8 +455,9 @@ time {
 }
 
 .identity-chip:hover {
-  border-color: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.14);
   color: var(--text-soft);
+  background: var(--surface-raised);
 }
 
 .identity-chip.active[data-identity="hasuki"] {
@@ -511,7 +512,7 @@ time {
 }
 
 .msg-input:empty::before {
-  content: '...';
+  content: 'ctrl+enter to send';
   color: var(--text-faint);
   pointer-events: none;
 }
@@ -528,8 +529,8 @@ time {
 .input-fmt-narrate { font-style: italic; opacity: 0.75; }
 
 /* Knowledge tag styles in the input */
-.input-tag-plan { border-bottom: 1px dashed var(--tag-plan); }
-.input-tag-pin  { border-bottom: 1px dashed var(--tag-pin); }
+.input-tag-plan { border-bottom: 2px dashed var(--tag-plan); background: rgba(184, 154, 106, 0.08); padding: 0 2px; border-radius: 2px; }
+.input-tag-pin  { border-bottom: 2px dashed var(--tag-pin); background: rgba(122, 157, 184, 0.08); padding: 0 2px; border-radius: 2px; }
 
 /* Identity colors in chat display */
 .chat-id-hasuki { color: #c4a0d4; }
@@ -683,8 +684,57 @@ time {
 /* --- Responsive --- */
 
 @media (max-width: 480px) {
-  .shell { padding: 0 12px; }
+  .shell {
+    padding: 0 12px;
+    padding-bottom: env(safe-area-inset-bottom, 0);
+  }
   .msg { padding: 10px 12px; }
-  .msg-input { font-size: 16px; /* prevent iOS zoom */ }
-  .identity-chip { font-size: 10px; padding: 3px 10px; }
+  .msg-input {
+    font-size: 16px; /* prevent iOS zoom */
+    max-height: 120px;
+  }
+  .identity-chip {
+    font-size: 11px;
+    padding: 8px 14px;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+  }
+  .tag-toggle {
+    padding: 8px 12px;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+  }
+  .send-btn {
+    min-height: 44px;
+    padding: 8px 16px;
+  }
+  .image-btn {
+    width: 44px;
+    height: 44px;
+  }
+  .image-preview .remove-image {
+    width: 32px;
+    height: 32px;
+    font-size: 16px;
+  }
+  .actor { font-size: 12px; }
+}
+
+@media (max-width: 320px) {
+  .shell { padding: 0 8px; }
+  .identity-row { gap: 4px; }
+  .identity-chip {
+    font-size: 10px;
+    padding: 6px 10px;
+    min-height: 44px;
+  }
+  .tag-toggle {
+    font-size: 10px;
+    padding: 6px 8px;
+    min-height: 44px;
+  }
+  .actions-row { gap: 4px; }
+  .msg-input { font-size: 16px; }
 }

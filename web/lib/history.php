@@ -201,8 +201,15 @@ function ss_parse_segments(string $text): array
                         $buffer = '';
                     }
                     if ($isClosing) {
-                        $idx = array_search($tagName, array_reverse($stack, true), true);
-                        if ($idx !== false) array_splice($stack, $idx, 1);
+                        // Remove the last occurrence of this tag from the stack
+                        $found = -1;
+                        for ($i = count($stack) - 1; $i >= 0; $i--) {
+                            if ($stack[$i] === $tagName) {
+                                $found = $i;
+                                break;
+                            }
+                        }
+                        if ($found >= 0) array_splice($stack, $found, 1);
                     } else {
                         $stack[] = $tagName;
                     }

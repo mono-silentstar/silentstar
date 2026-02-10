@@ -112,10 +112,14 @@
 
   function generateNoise() {
     noiseCanvas = document.createElement('canvas');
-    noiseCanvas.width = w;
-    noiseCanvas.height = h;
+    // Cap noise resolution to save memory on high-res displays
+    const maxDim = 512;
+    const noiseW = Math.min(w, maxDim);
+    const noiseH = Math.min(h, maxDim);
+    noiseCanvas.width = noiseW;
+    noiseCanvas.height = noiseH;
     const nctx = noiseCanvas.getContext('2d');
-    const imageData = nctx.createImageData(w, h);
+    const imageData = nctx.createImageData(noiseW, noiseH);
     const data = imageData.data;
     for (let i = 0; i < data.length; i += 4) {
       const v = Math.random() * 12;
@@ -183,6 +187,18 @@
   document.addEventListener('mousemove', (e) => {
     mouse.x = e.clientX;
     mouse.y = e.clientY;
+  });
+
+  document.addEventListener('touchmove', (e) => {
+    if (e.touches.length > 0) {
+      mouse.x = e.touches[0].clientX;
+      mouse.y = e.touches[0].clientY;
+    }
+  }, { passive: true });
+
+  document.addEventListener('touchend', () => {
+    mouse.x = -1;
+    mouse.y = -1;
   });
 
   document.addEventListener('mouseleave', () => {
