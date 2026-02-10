@@ -31,12 +31,13 @@ if str(REPO_ROOT) not in sys.path:
 from agents.orchestrator import turn, TurnConfig, TurnResult
 from agents.claude_client import ClaudeConfig
 
-# How long the worker loops before exiting (cron restarts it)
-MAX_RUN_SECONDS = 55
-# Sleep between job checks when idle
-IDLE_SLEEP = 1.0
-# Sleep between job checks when signal file was absent
-POLL_SLEEP = 2.0
+# How long the worker loops before exiting (cron restarts it next minute).
+# Set >60 so the next cron invocation overlaps and waits for handoff — zero gap.
+MAX_RUN_SECONDS = 65
+# Sleep between job checks after trigger signal (sub-second response)
+IDLE_SLEEP = 0.05
+# Sleep between job checks when idle (no trigger)
+POLL_SLEEP = 0.5
 
 
 @dataclass
@@ -392,15 +393,11 @@ def run(cfg: CronConfig) -> int:
     log(f"jobs_dir: {cfg.jobs_dir}")
     log(f"db: {cfg.db_path}")
 
-    # Acquire exclusive lock — prevents overlapping cron runs
+    # Acquire exclusive lock — if another worker is still running,
+    # block until it finishes (zero-gap handoff between cron cycles)
     lock_path = Path(__file__).parent / "worker.lock"
     lock_fd = open(lock_path, "w")
-    try:
-        fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
-        log("another worker is running, exiting")
-        lock_fd.close()
-        return 0
+    fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)  # blocks until free
 
     # Graceful shutdown on SIGTERM/SIGINT
     shutdown = False

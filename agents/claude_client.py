@@ -2,8 +2,9 @@
 Claude Client — the bridge between our system and Claude.
 
 Two transports:
-  - API (default): Anthropic Messages API. Clean system prompt separation.
-    Requires ANTHROPIC_API_KEY or api_key in config.
+  - API (default): Anthropic Messages API via raw HTTP (urllib).
+    No third-party dependencies. Requires api_key in config
+    or ANTHROPIC_API_KEY env var.
   - CLI (fallback): claude -p. Carries Claude Code's system prompt,
     which fights with the wake context. Use only if API isn't available.
 
@@ -17,12 +18,15 @@ how the prompt gets to Claude and back.
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import subprocess
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.request import Request, urlopen
+from urllib.error import HTTPError, URLError
 
 
 @dataclass
@@ -82,34 +86,27 @@ def send(
 
 # --- API transport (default) ---
 
+ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
+ANTHROPIC_API_VERSION = "2023-06-01"
+
+
 def _send_api(
     user_message: str,
     config: ClaudeConfig,
     image_path: Path | None = None,
     system_prompt: str | None = None,
 ) -> ClaudeResponse:
-    """Send via Anthropic Messages API. Clean system prompt, no hidden instructions."""
-    try:
-        import anthropic
-    except ImportError:
-        raise RuntimeError(
-            "anthropic package not installed. "
-            "Run: pip install anthropic"
-        )
-
+    """Send via Anthropic Messages API using raw HTTP. No third-party deps."""
     api_key = config.api_key or os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
         raise RuntimeError(
             "No API key. Set ANTHROPIC_API_KEY or api_key in config."
         )
 
-    client = anthropic.Anthropic(api_key=api_key)
-
     # Build user content — text, optionally with image
     content: list[dict] = []
 
     if image_path and image_path.exists():
-        import base64
         image_data = base64.standard_b64encode(
             image_path.read_bytes()
         ).decode("utf-8")
@@ -125,23 +122,43 @@ def _send_api(
 
     content.append({"type": "text", "text": user_message})
 
-    # Build the request
-    kwargs: dict = {
+    # Build the request body
+    body: dict = {
         "model": config.model,
         "max_tokens": config.max_tokens,
         "messages": [{"role": "user", "content": content}],
     }
 
     if system_prompt:
-        kwargs["system"] = system_prompt
+        body["system"] = system_prompt
 
-    response = client.messages.create(**kwargs)
+    data = json.dumps(body).encode("utf-8")
 
-    # Extract text from response
+    req = Request(
+        ANTHROPIC_API_URL,
+        data=data,
+        headers={
+            "Content-Type": "application/json",
+            "X-API-Key": api_key,
+            "anthropic-version": ANTHROPIC_API_VERSION,
+        },
+        method="POST",
+    )
+
+    try:
+        with urlopen(req, timeout=config.timeout_seconds) as resp:
+            result = json.loads(resp.read().decode("utf-8"))
+    except HTTPError as e:
+        error_body = e.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Anthropic API error {e.code}: {error_body}")
+    except URLError as e:
+        raise RuntimeError(f"Network error: {e.reason}")
+
+    # Extract text from response content blocks
     text = ""
-    for block in response.content:
-        if hasattr(block, "text"):
-            text += block.text
+    for block in result.get("content", []):
+        if block.get("type") == "text":
+            text += block.get("text", "")
 
     return ClaudeResponse(text=text, success=True)
 
