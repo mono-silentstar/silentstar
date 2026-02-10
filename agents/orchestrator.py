@@ -83,10 +83,13 @@ def turn(
         ambient_path=config.ambient_path,
     )
 
+    # Format hot context with identity — same convention as Recent section
+    hot = f"{actor or 'mono'}: {message}"
+
     # TODO: carry forward recall results from previous Claude response
     package = assemble(
         wake_config,
-        hot_context=message,
+        hot_context=hot,
         current_turn=mono_result.turn,
         image_path=image_path,
     )
