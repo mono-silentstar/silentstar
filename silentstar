@@ -2,8 +2,9 @@
 # Start the silentstar bridge worker.
 # Run from anywhere — it finds its own way home.
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-cd "$SCRIPT_DIR"
+REAL_PATH="$(readlink -f "$0")"
+PROJECT_DIR="$(dirname "$REAL_PATH")"
+cd "$PROJECT_DIR"
 
 echo "starting silentstar worker..."
 python3 worker/worker.py --config worker/config.json

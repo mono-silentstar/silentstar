@@ -61,35 +61,22 @@ try {
         ]);
     }
 
-    // Done — render the completed turn
+    // Done — render only Claude's response.
+    // Mono's message is already shown client-side by chat.js appendMonoMessage().
     if ($format === 'html') {
         $display = $job['display'] ?? [];
-        $monoText = (string)($job['message'] ?? '');
-        $monoActor = (string)($job['actor'] ?? 'mono');
-        $tags = $job['tags'] ?? [];
-        $uploadName = is_array($job['upload'] ?? null)
-            ? ($job['upload']['host_name'] ?? null)
-            : null;
         $claudeActor = (string)($job['reply_actor'] ?? 'claude');
         $ts = $job['completed_at'] ?? $job['created_at'] ?? '';
 
-        $entry = [
-            'job_id' => $jobId,
-            'ts'     => $ts,
-            'mono'   => [
-                'actor' => $monoActor,
-                'text'  => $monoText,
-                'tags'  => $tags,
-                'image' => $uploadName,
-            ],
-            'claude' => [
-                'actor'   => $claudeActor,
-                'display' => is_array($display) ? $display : [],
-            ],
+        $claude = [
+            'actor'   => $claudeActor,
+            'display' => is_array($display) ? $display : [],
         ];
 
         header('Content-Type: text/html; charset=utf-8');
-        echo ss_render_turn($entry);
+        $html = ss_render_claude_msg($claude, $ts);
+        // If empty (secret/invisible), remove the pending element silently
+        echo $html !== '' ? $html : '<span></span>';
         exit;
     }
 
