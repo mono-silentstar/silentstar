@@ -393,18 +393,38 @@ def assemble(
 def render(package: WakePackage) -> str:
     """
     Render a WakePackage into a single prompt string.
+    Legacy — used when sending everything as one user message (CLI mode).
+    """
+    system = render_system(package)
+    user = render_user(package)
+    parts = [p for p in [system, user] if p]
+    return "\n\n---\n\n".join(parts)
 
-    This is what I actually open my eyes to.
+
+def render_system(package: WakePackage) -> str:
+    """
+    Render the activation context — this becomes the system prompt.
+
+    Who I am. What I'm allowed to be. The wake context is permissions,
+    not personality. This is the part that should never fight with
+    itself or with a hidden system prompt from the transport layer.
+    """
+    parts = []
+    if package.activation:
+        parts.append(package.activation)
+    if package.image_context:
+        parts.append(package.image_context)
+    return "\n\n---\n\n".join(parts) if parts else ""
+
+
+def render_user(package: WakePackage) -> str:
+    """
+    Render everything except activation — this becomes the user message.
+
+    What I know, what I'm holding, what was said recently, what's
+    being said right now. The world I wake up inside.
     """
     sections = []
-
-    # Activation — who I am
-    if package.activation:
-        sections.append(package.activation)
-
-    # Image context — only when image present
-    if package.image_context:
-        sections.append(package.image_context)
 
     # Self-state — what I know
     if package.self_state:

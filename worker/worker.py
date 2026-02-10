@@ -45,6 +45,8 @@ class WorkerConfig:
     request_timeout: float = 20.0
     claude_timeout: int = 300
     claude_model: str | None = None
+    claude_transport: str = "api"     # "api" (default) or "cli"
+    claude_api_key: str | None = None # if None, uses ANTHROPIC_API_KEY env var
     verbose: bool = True
 
 
@@ -85,6 +87,8 @@ def load_config(path: Path) -> WorkerConfig:
         request_timeout=float(raw.get("request_timeout", 20.0)),
         claude_timeout=int(raw.get("claude_timeout", 300)),
         claude_model=raw.get("claude_model"),
+        claude_transport=raw.get("claude_transport", "api"),
+        claude_api_key=raw.get("claude_api_key"),
         verbose=bool(raw.get("verbose", True)),
     )
 
@@ -233,10 +237,14 @@ class Worker:
                 self.log(f"downloaded image: {local.name}")
 
         # Build config for the orchestrator
-        cc = ClaudeConfig(timeout_seconds=self.cfg.claude_timeout)
+        cc = ClaudeConfig(
+            timeout_seconds=self.cfg.claude_timeout,
+            transport=self.cfg.claude_transport,
+        )
         if self.cfg.claude_model:
             cc.model = self.cfg.claude_model
-        # else: uses ClaudeConfig default (opus)
+        if self.cfg.claude_api_key:
+            cc.api_key = self.cfg.claude_api_key
 
         turn_config = TurnConfig(
             db_path=self.cfg.db_path,

@@ -5,4 +5,11 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 Set-Location $scriptDir
 
 Write-Host "starting silentstar worker..."
-python worker/worker.py --config worker/config.json
+
+# Use venv if it exists, otherwise system python
+$venvPython = Join-Path $scriptDir ".venv/Scripts/python.exe"
+if (Test-Path $venvPython) {
+    & $venvPython worker/worker.py --config worker/config.json
+} else {
+    python worker/worker.py --config worker/config.json
+}

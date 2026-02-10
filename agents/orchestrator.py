@@ -18,7 +18,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from wake.assemble import assemble, render, WakeConfig
+from wake.assemble import assemble, render_system, render_user, WakeConfig
 from wake.recall import recall, RecallResult
 from wake.schema import migrate
 from ingest.parse import (
@@ -94,11 +94,15 @@ def turn(
         image_path=image_path,
     )
 
-    prompt = render(package)
+    system_prompt = render_system(package)
+    user_message = render_user(package)
 
     # 3. Send to Claude
     img = Path(image_path) if image_path else None
-    claude_response = send(prompt, config.claude_config, img)
+    claude_response = send(
+        user_message, config.claude_config, img,
+        system_prompt=system_prompt,
+    )
 
     if not claude_response.success:
         return TurnResult(
