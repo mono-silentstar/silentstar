@@ -25,7 +25,7 @@ from pathlib import Path
 class ClaudeConfig:
     """Configuration for the Claude client."""
     cli_path: str = "claude"          # path to claude binary
-    model: str | None = None          # override model (None = default)
+    model: str = "claude-opus-4-6"    # opus by default — this is a room, not a tool
     timeout_seconds: int = 300        # max wait for response
     max_tokens: int | None = None     # max response tokens (None = default)
 
