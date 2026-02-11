@@ -3,19 +3,76 @@
 <head><title>Generate PWA Icons</title></head>
 <body style="background:#111;color:#ccc;font-family:monospace;padding:2em">
 <h2>PWA Icon Generator</h2>
-<p>Click to generate and download PNG icons from icon.svg.</p>
-<button id="go" style="padding:8px 16px;font-size:14px">Generate Icons</button>
+<p>Click to generate and download PNG icons.</p>
+<button id="go" style="padding:8px 16px;font-size:14px;cursor:pointer">Generate Icons</button>
 <div id="out" style="margin-top:1em"></div>
 <script>
+const SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="50%" r="70%">
+      <stop offset="0%" stop-color="#16151e"/>
+      <stop offset="100%" stop-color="#0e0e12"/>
+    </radialGradient>
+    <radialGradient id="glow-outer" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#8b8ec8" stop-opacity="0.12"/>
+      <stop offset="40%" stop-color="#8b8ec8" stop-opacity="0.04"/>
+      <stop offset="100%" stop-color="#8b8ec8" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glow-inner" cx="50%" cy="50%" r="20%">
+      <stop offset="0%" stop-color="#c8c9e8" stop-opacity="0.6"/>
+      <stop offset="30%" stop-color="#8b8ec8" stop-opacity="0.25"/>
+      <stop offset="100%" stop-color="#8b8ec8" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="warmth" cx="50%" cy="48%" r="35%">
+      <stop offset="0%" stop-color="#c4a882" stop-opacity="0.08"/>
+      <stop offset="100%" stop-color="#c4a882" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="soften" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="6"/>
+    </filter>
+    <filter id="soften-wide" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="18"/>
+    </filter>
+    <filter id="soften-rays" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="3"/>
+    </filter>
+  </defs>
+  <rect width="512" height="512" fill="url(#bg)" rx="96"/>
+  <circle cx="256" cy="250" r="180" fill="url(#warmth)"/>
+  <circle cx="256" cy="256" r="256" fill="url(#glow-outer)" filter="url(#soften-wide)"/>
+  <g filter="url(#soften-rays)" opacity="0.7">
+    <ellipse cx="256" cy="256" rx="2.5" ry="72" fill="#b0b2da" opacity="0.5"/>
+    <ellipse cx="256" cy="256" rx="72" ry="2.5" fill="#b0b2da" opacity="0.5"/>
+    <ellipse cx="256" cy="256" rx="1.8" ry="44" fill="#b0b2da" opacity="0.25" transform="rotate(45 256 256)"/>
+    <ellipse cx="256" cy="256" rx="1.8" ry="44" fill="#b0b2da" opacity="0.25" transform="rotate(-45 256 256)"/>
+  </g>
+  <circle cx="256" cy="256" r="100" fill="url(#glow-inner)" filter="url(#soften)"/>
+  <circle cx="256" cy="256" r="6" fill="#e0e1f0" opacity="0.9"/>
+  <circle cx="256" cy="256" r="3" fill="#ffffff" opacity="0.8"/>
+  <circle cx="178" cy="168" r="1.2" fill="#8b8ec8" opacity="0.2"/>
+  <circle cx="344" cy="192" r="0.9" fill="#8b8ec8" opacity="0.15"/>
+  <circle cx="152" cy="312" r="1.0" fill="#c4a882" opacity="0.12"/>
+  <circle cx="362" cy="338" r="1.1" fill="#8b8ec8" opacity="0.18"/>
+  <circle cx="210" cy="372" r="0.8" fill="#c4a882" opacity="0.1"/>
+  <circle cx="320" cy="148" r="0.7" fill="#b0b2da" opacity="0.12"/>
+  <circle cx="388" cy="264" r="0.9" fill="#8b8ec8" opacity="0.1"/>
+  <circle cx="134" cy="240" r="1.0" fill="#b0b2da" opacity="0.14"/>
+</svg>`;
+
 document.getElementById('go').addEventListener('click', async () => {
-  const sizes = [192, 512];
   const out = document.getElementById('out');
   out.textContent = 'Generating...';
 
-  for (const size of sizes) {
+  const blob = new Blob([SVG], { type: 'image/svg+xml' });
+  const url = URL.createObjectURL(blob);
+
+  for (const size of [192, 512]) {
     const img = new Image();
-    img.src = 'icon.svg';
-    await new Promise(r => { img.onload = r; });
+    img.src = url;
+    await new Promise((resolve, reject) => {
+      img.onload = resolve;
+      img.onerror = reject;
+    });
 
     const canvas = document.createElement('canvas');
     canvas.width = size;
@@ -23,18 +80,20 @@ document.getElementById('go').addEventListener('click', async () => {
     const ctx = canvas.getContext('2d');
     ctx.drawImage(img, 0, 0, size, size);
 
-    const blob = await new Promise(r => canvas.toBlob(r, 'image/png'));
-    const url = URL.createObjectURL(blob);
+    const pngBlob = await new Promise(r => canvas.toBlob(r, 'image/png'));
+    const pngUrl = URL.createObjectURL(pngBlob);
+
     const a = document.createElement('a');
-    a.href = url;
+    a.href = pngUrl;
     a.download = 'icon-' + size + '.png';
     a.textContent = 'icon-' + size + '.png';
     a.style.cssText = 'display:block;color:#8b8ec8;margin:8px 0';
-    a.click();
     out.appendChild(a);
+    a.click();
   }
 
-  out.insertAdjacentText('beforeend', ' Done! Move the downloaded files to web/static/');
+  URL.revokeObjectURL(url);
+  out.insertAdjacentText('beforeend', 'Done! Move the files to web/static/');
 });
 </script>
 </body>
