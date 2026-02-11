@@ -79,18 +79,18 @@ $loginError = isset($_GET['login_error']) && $_GET['login_error'] === '1';
     <div class="input-area">
 
       <div class="identity-row">
-        <span class="identity-chip" data-identity="hasuki">hasuki</span>
-        <span class="identity-chip" data-identity="renki">renki</span>
-        <span class="identity-chip" data-identity="luna">luna</span>
-        <span class="identity-chip" data-identity="chloe">chloe</span>
-        <span class="identity-chip" data-identity="strah">strah</span>
+        <span class="identity-chip" data-identity="hasuki" role="button" aria-pressed="false">hasuki</span>
+        <span class="identity-chip" data-identity="renki" role="button" aria-pressed="false">renki</span>
+        <span class="identity-chip" data-identity="luna" role="button" aria-pressed="false">luna</span>
+        <span class="identity-chip" data-identity="chloe" role="button" aria-pressed="false">chloe</span>
+        <span class="identity-chip" data-identity="strah" role="button" aria-pressed="false">strah</span>
       </div>
 
       <form id="chat-form" enctype="multipart/form-data">
         <div class="input-row">
           <div class="input-wrap">
             <div id="msg-input" class="msg-input" contenteditable="true"
-                 role="textbox" aria-multiline="true"></div>
+                 role="textbox" aria-multiline="true" aria-label="Message"></div>
           </div>
         </div>
 
@@ -102,11 +102,11 @@ $loginError = isset($_GET['login_error']) && $_GET['login_error'] === '1';
         <input type="file" id="image-input" accept="image/*">
 
         <div class="actions-row">
-          <button type="button" class="tag-toggle" data-tag="do">do</button>
-          <button type="button" class="tag-toggle" data-tag="narrate">narrate</button>
+          <button type="button" class="tag-toggle" data-tag="do" aria-pressed="false">do</button>
+          <button type="button" class="tag-toggle" data-tag="narrate" aria-pressed="false">narrate</button>
           <span class="tag-sep"></span>
-          <button type="button" class="tag-toggle" data-tag="plan">plan</button>
-          <button type="button" class="tag-toggle" data-tag="pin">pin</button>
+          <button type="button" class="tag-toggle" data-tag="plan" aria-pressed="false">plan</button>
+          <button type="button" class="tag-toggle" data-tag="pin" aria-pressed="false">pin</button>
           <button type="button" id="image-btn" class="image-btn" title="attach image">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>

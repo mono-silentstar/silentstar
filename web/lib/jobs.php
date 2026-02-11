@@ -19,7 +19,6 @@ define('SS_KNOWLEDGE_TAGS', ['plan', 'pin']);
 function ss_normalize_actor(?string $actor): string
 {
     $v = strtolower(trim((string)$actor));
-    if ($v === 'ylhara') $v = "y'lhara";
     if (in_array($v, SS_MONO_IDENTITIES, true)) return $v;
     return 'mono';
 }

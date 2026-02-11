@@ -35,6 +35,7 @@
   let currentKnowledge = { plan: false, pin: false };
   let bridgeOnline = false;
   let submitting = false;
+  let composing = false;
   let pollIntervals = [];
 
   // --- Contenteditable: span management ---
@@ -283,7 +284,15 @@
     const prev = span.previousSibling;
     if (!prev) return;
     if (prev.nodeName === 'BR') return;
-    if (prev.nodeType === Node.ELEMENT_NODE && prev.tagName === 'SPAN' && isSpanEmpty(prev)) return;
+    if (prev.nodeType === Node.ELEMENT_NODE && prev.tagName === 'SPAN') {
+      if (isSpanEmpty(prev)) return;
+      // Only insert BR for format/identity switches, not knowledge-only
+      const prevFmt = prev.dataset.format || null;
+      const prevId = prev.dataset.identity || null;
+      const curFmt = span.dataset.format || null;
+      const curId = span.dataset.identity || null;
+      if (prevFmt === curFmt && prevId === curId) return;
+    }
     span.before(document.createElement('br'));
   }
 
@@ -291,14 +300,20 @@
   document.querySelectorAll('.identity-chip').forEach(chip => {
     chip.addEventListener('mousedown', ev => ev.preventDefault());
     chip.addEventListener('click', () => {
+      if (composing) return;
       const val = chip.dataset.identity;
       if (currentIdentity === val) {
         currentIdentity = null;
         chip.classList.remove('active');
+        chip.setAttribute('aria-pressed', 'false');
       } else {
-        document.querySelectorAll('.identity-chip').forEach(c => c.classList.remove('active'));
+        document.querySelectorAll('.identity-chip').forEach(c => {
+          c.classList.remove('active');
+          c.setAttribute('aria-pressed', 'false');
+        });
         currentIdentity = val;
         chip.classList.add('active');
+        chip.setAttribute('aria-pressed', 'true');
       }
       msgInput.focus();
       ensureActiveSpan();
@@ -313,21 +328,28 @@
 
     btn.addEventListener('mousedown', ev => ev.preventDefault());
     btn.addEventListener('click', () => {
+      if (composing) return;
       if (FORMATS.includes(tag)) {
         if (currentFormat === tag) {
           currentFormat = null;
           btn.classList.remove('active-' + tag);
+          btn.setAttribute('aria-pressed', 'false');
         } else {
           FORMATS.forEach(f => {
             const other = document.querySelector('.tag-toggle[data-tag="' + f + '"]');
-            if (other) other.classList.remove('active-' + f);
+            if (other) {
+              other.classList.remove('active-' + f);
+              other.setAttribute('aria-pressed', 'false');
+            }
           });
           currentFormat = tag;
           btn.classList.add('active-' + tag);
+          btn.setAttribute('aria-pressed', 'true');
         }
       } else if (KNOWLEDGE.includes(tag)) {
         currentKnowledge[tag] = !currentKnowledge[tag];
         btn.classList.toggle('active-' + tag, currentKnowledge[tag]);
+        btn.setAttribute('aria-pressed', String(currentKnowledge[tag]));
       }
       msgInput.focus();
       ensureActiveSpan();
@@ -347,7 +369,64 @@
         span.appendChild(child);
       }
     }
+    syncStateFromDOM();
   });
+
+  // Prevent HTML drag-drop into contenteditable
+  msgInput.addEventListener('drop', ev => { ev.preventDefault(); });
+
+  // IME composition guards
+  msgInput.addEventListener('compositionstart', () => { composing = true; });
+  msgInput.addEventListener('compositionend', () => { composing = false; });
+
+  // Sync JS state from DOM (handles browser undo reverting span changes)
+  function syncStateFromDOM() {
+    const sel = window.getSelection();
+    if (!sel.rangeCount) return;
+    const span = findParentSpan(sel.getRangeAt(0).startContainer);
+    if (!span) return;
+
+    const spanId = span.dataset.identity || null;
+    const spanFmt = span.dataset.format || null;
+    const spanPlan = span.dataset.plan === '1';
+    const spanPin = span.dataset.pin === '1';
+
+    if (spanId !== currentIdentity) {
+      currentIdentity = spanId;
+      document.querySelectorAll('.identity-chip').forEach(c => {
+        const active = c.dataset.identity === currentIdentity;
+        c.classList.toggle('active', active);
+        c.setAttribute('aria-pressed', String(active));
+      });
+    }
+    if (spanFmt !== currentFormat) {
+      currentFormat = spanFmt;
+      FORMATS.forEach(f => {
+        const b = document.querySelector('.tag-toggle[data-tag="' + f + '"]');
+        if (b) {
+          const active = f === currentFormat;
+          b.classList.toggle('active-' + f, active);
+          b.setAttribute('aria-pressed', String(active));
+        }
+      });
+    }
+    if (spanPlan !== currentKnowledge.plan) {
+      currentKnowledge.plan = spanPlan;
+      const b = document.querySelector('.tag-toggle[data-tag="plan"]');
+      if (b) {
+        b.classList.toggle('active-plan', spanPlan);
+        b.setAttribute('aria-pressed', String(spanPlan));
+      }
+    }
+    if (spanPin !== currentKnowledge.pin) {
+      currentKnowledge.pin = spanPin;
+      const b = document.querySelector('.tag-toggle[data-tag="pin"]');
+      if (b) {
+        b.classList.toggle('active-pin', spanPin);
+        b.setAttribute('aria-pressed', String(spanPin));
+      }
+    }
+  }
 
   // Strip paste to plain text
   msgInput.addEventListener('paste', ev => {
@@ -499,6 +578,8 @@
     let result = '';
     for (const seg of segments) {
       let t = seg.text;
+      // Don't wrap bare newlines in display tags
+      if (t.replace(/\n/g, '') === '') { result += t; continue; }
       const fmt = seg.format || 'say';
       t = '<' + fmt + '>' + t + '</' + fmt + '>';
       if (seg.plan) t = '<plan>' + t + '</plan>';
@@ -540,6 +621,12 @@
     previewImg.src = '';
   }
 
+  // --- Auth guard ---
+  function checkAuth(resp) {
+    if (resp.status === 401) { window.location.href = '.'; return true; }
+    return false;
+  }
+
   // --- Form submission ---
   form.addEventListener('submit', async ev => {
     ev.preventDefault();
@@ -569,6 +656,7 @@
 
     try {
       const resp = await fetch('api/submit.php', { method: 'POST', body: fd, credentials: 'same-origin' });
+      if (checkAuth(resp)) return;
       const data = await resp.json();
 
       if (!data || !data.ok) { showError(data?.error || 'submit failed'); return; }
@@ -581,15 +669,18 @@
       currentFormat = null;
       FORMATS.forEach(f => {
         const b = document.querySelector('.tag-toggle[data-tag="' + f + '"]');
-        if (b) b.classList.remove('active-' + f);
+        if (b) { b.classList.remove('active-' + f); b.setAttribute('aria-pressed', 'false'); }
       });
       KNOWLEDGE.forEach(k => {
         currentKnowledge[k] = false;
         const b = document.querySelector('.tag-toggle[data-tag="' + k + '"]');
-        if (b) b.classList.remove('active-' + k);
+        if (b) { b.classList.remove('active-' + k); b.setAttribute('aria-pressed', 'false'); }
       });
       currentIdentity = null;
-      document.querySelectorAll('.identity-chip').forEach(c => c.classList.remove('active'));
+      document.querySelectorAll('.identity-chip').forEach(c => {
+        c.classList.remove('active');
+        c.setAttribute('aria-pressed', 'false');
+      });
 
       appendPending(data.job_id);
 
@@ -659,14 +750,17 @@
     const poll = setInterval(async () => {
       try {
         const resp = await fetch('api/status.php?id=' + jobId + '&format=json', { credentials: 'same-origin' });
+        if (checkAuth(resp)) { clearInterval(poll); return; }
         const data = await resp.json();
         if (!data || !data.ok) return;
 
         if (data.status === 'done') {
           clearInterval(poll);
           div.remove();
+          // Guard against duplicate rendering (e.g. two tabs polling same job)
+          if (chatLog.querySelector('[data-rendered-job="' + jobId + '"]')) return;
           if (Array.isArray(data.display) && data.display.length > 0) {
-            appendClaudeMessage(data.display, data.actor || 'claude');
+            appendClaudeMessage(data.display, data.actor || 'claude', jobId);
           }
         } else if (data.status === 'error') {
           clearInterval(poll);
@@ -685,9 +779,10 @@
     pollIntervals.push(poll);
   }
 
-  function appendClaudeMessage(display, actor) {
+  function appendClaudeMessage(display, actor, jobId) {
     const div = document.createElement('div');
     div.className = 'turn';
+    if (jobId) div.dataset.renderedJob = jobId;
 
     let bodyHtml = '';
     for (const span of display) {
@@ -742,6 +837,7 @@
   async function checkBridge() {
     try {
       const resp = await fetch('api/bridge_state.php', { credentials: 'same-origin' });
+      if (checkAuth(resp)) return;
       const data = await resp.json();
       bridgeOnline = !!(data && data.ok && data.online);
     } catch { bridgeOnline = false; }

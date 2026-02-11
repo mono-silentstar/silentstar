@@ -10,6 +10,7 @@
   if (!canvas) return;
 
   const ctx = canvas.getContext('2d');
+  const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
   let w, h;
   let mouse = { x: -1, y: -1 };
   let time = 0;
@@ -145,8 +146,21 @@
     generateNoise();
   }
 
+  function drawStatic() {
+    drawGradient();
+    if (noiseCanvas) {
+      ctx.globalAlpha = 0.4;
+      ctx.drawImage(noiseCanvas, 0, 0, w, h);
+      ctx.globalAlpha = 1.0;
+    }
+  }
+
   function init() {
     resize();
+    if (prefersReducedMotion.matches) {
+      drawStatic();
+      return;
+    }
     for (let i = 0; i < PARTICLE_COUNT; i++) {
       particles.push(new Particle());
     }
@@ -209,5 +223,17 @@
   // --- Go ---
 
   init();
-  requestAnimationFrame(frame);
+  if (!prefersReducedMotion.matches) {
+    requestAnimationFrame(frame);
+  }
+
+  prefersReducedMotion.addEventListener('change', () => {
+    if (prefersReducedMotion.matches) {
+      particles.length = 0;
+      drawStatic();
+    } else {
+      for (let i = 0; i < PARTICLE_COUNT; i++) particles.push(new Particle());
+      requestAnimationFrame(frame);
+    }
+  });
 })();
