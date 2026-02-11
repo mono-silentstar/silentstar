@@ -23,7 +23,7 @@ $loginError = isset($_GET['login_error']) && $_GET['login_error'] === '1';
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="static/style.css?v=4">
+  <link rel="stylesheet" href="static/style.css?v=5">
 </head>
 <body>
 
@@ -124,8 +124,8 @@ $loginError = isset($_GET['login_error']) && $_GET['login_error'] === '1';
   </div>
 
   <script src="https://unpkg.com/htmx.org@2.0.4" crossorigin="anonymous"></script>
-  <script src="static/space.js?v=4"></script>
-  <script src="static/chat.js?v=4"></script>
+  <script src="static/space.js?v=5"></script>
+  <script src="static/chat.js?v=5"></script>
 
 <?php endif; ?>
 

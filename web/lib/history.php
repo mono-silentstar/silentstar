@@ -109,7 +109,7 @@ function ss_render_mono_msg(array $mono, string $ts): string
 
     return <<<HTML
     <div class="turn">
-      <div class="msg mono">
+      <div class="msg mono" data-identity="{$actor}">
         <span class="actor" data-actor="{$actor}">{$actor}</span>
         {$imageHtml}
         <div class="body">{$bodyHtml}</div>

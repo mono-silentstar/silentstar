@@ -19,6 +19,12 @@
   --claude-accent:  #8b8ec8;
   --claude-glow:    rgba(139, 142, 200, 0.08);
 
+  --id-hasuki:   #c4a0d4;
+  --id-renki:    #7ab0d4;
+  --id-luna:     #b0b0bc;
+  --id-chloe:    #d4c478;
+  --id-strah:    #9a6b72;
+
   --tag-do:         #c4967a;
   --tag-narrate:    #8a9a7a;
   --tag-plan:       #b89a6a;
@@ -247,6 +253,27 @@ html, body {
   background: var(--mono-glow);
 }
 
+.msg.mono[data-identity="hasuki"] {
+  border-left-color: var(--id-hasuki);
+  background: rgba(196, 160, 212, 0.06);
+}
+.msg.mono[data-identity="renki"] {
+  border-left-color: var(--id-renki);
+  background: rgba(122, 176, 212, 0.06);
+}
+.msg.mono[data-identity="luna"] {
+  border-left-color: var(--id-luna);
+  background: rgba(176, 176, 188, 0.06);
+}
+.msg.mono[data-identity="chloe"] {
+  border-left-color: var(--id-chloe);
+  background: rgba(212, 196, 120, 0.06);
+}
+.msg.mono[data-identity="strah"] {
+  border-left-color: var(--id-strah);
+  background: rgba(154, 107, 114, 0.06);
+}
+
 .msg.claude {
   border-left-color: var(--claude-accent);
   background: var(--claude-glow);
@@ -287,8 +314,8 @@ html, body {
 .display-say { }
 
 .display-do {
-  opacity: 0.82;
-  color: var(--tag-do);
+  opacity: 0.65;
+  filter: saturate(0.7);
 }
 
 .display-narrate {
@@ -320,8 +347,8 @@ html, body {
 }
 
 .inline-do {
-  opacity: 0.85;
-  color: var(--tag-do);
+  opacity: 0.65;
+  filter: saturate(0.7);
 }
 
 .inline-narrate {
@@ -521,7 +548,7 @@ time {
 .input-id-strah  { color: #9a6b72; }
 
 /* Format styles in the input */
-.input-fmt-do      { color: var(--tag-do); }
+.input-fmt-do      { opacity: 0.65; filter: saturate(0.7); }
 .input-fmt-narrate { color: var(--tag-narrate); opacity: 0.75; }
 
 /* Knowledge tag styles in the input */

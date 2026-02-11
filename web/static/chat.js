@@ -36,6 +36,7 @@
   let bridgeOnline = false;
   let submitting = false;
   let composing = false;
+  let initialLoad = true;
   let pollIntervals = [];
 
   // --- Contenteditable: span management ---
@@ -281,6 +282,7 @@
     if (!sel.rangeCount) return;
     const span = findParentSpan(sel.getRangeAt(0).startContainer);
     if (!span) return;
+    if (isSpanEmpty(span)) return;
     const prev = span.previousSibling;
     if (!prev) return;
     if (prev.nodeName === 'BR') return;
@@ -294,6 +296,10 @@
       if (prevFmt === curFmt && prevId === curId) return;
     }
     span.before(document.createElement('br'));
+  }
+
+  function inputHasContent() {
+    return msgInput.textContent.replace(/\u200B/g, '').trim() !== '';
   }
 
   // --- Identity chips ---
@@ -316,9 +322,11 @@
         chip.setAttribute('aria-pressed', 'true');
       }
       msgInput.focus();
-      ensureActiveSpan();
-      normalizeInput();
-      insertNewlineBeforeTagSwitch();
+      if (inputHasContent()) {
+        ensureActiveSpan();
+        normalizeInput();
+        insertNewlineBeforeTagSwitch();
+      }
     });
   });
 
@@ -352,9 +360,11 @@
         btn.setAttribute('aria-pressed', String(currentKnowledge[tag]));
       }
       msgInput.focus();
-      ensureActiveSpan();
-      normalizeInput();
-      insertNewlineBeforeTagSwitch();
+      if (inputHasContent()) {
+        ensureActiveSpan();
+        normalizeInput();
+        insertNewlineBeforeTagSwitch();
+      }
     });
   });
 
@@ -619,6 +629,7 @@
     imagePreview.classList.remove('visible');
     if (previewImg.src.startsWith('blob:')) URL.revokeObjectURL(previewImg.src);
     previewImg.src = '';
+    msgInput.focus();
   }
 
   // --- Auth guard ---
@@ -728,7 +739,7 @@
     const isoTs = now.toISOString();
 
     div.innerHTML =
-      '<div class="msg mono">' +
+      '<div class="msg mono" data-identity="' + esc(actorName) + '">' +
         '<span class="actor" data-actor="' + esc(actorName) + '">' + esc(actorName) + '</span>' +
         imageHtml +
         '<div class="body">' + bodyHtml + '</div>' +
@@ -866,7 +877,10 @@
   // --- HTMX events ---
   document.body.addEventListener('htmx:afterSettle', () => {
     formatMsgTimes(chatLog);
-    if (chatArea.scrollHeight - chatArea.scrollTop - chatArea.clientHeight < 100) {
+    if (initialLoad) {
+      scrollToBottom();
+      initialLoad = false;
+    } else if (chatArea.scrollHeight - chatArea.scrollTop - chatArea.clientHeight < 100) {
       scrollToBottom();
     }
   });
@@ -876,7 +890,6 @@
   });
 
   // --- Init ---
-  scrollToBottom();
   msgInput.focus();
   if (sendBtn) sendBtn.title = 'Send (Ctrl+Enter)';
 
