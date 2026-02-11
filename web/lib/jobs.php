@@ -213,6 +213,9 @@ function ss_validate_upload(array $file, string $jobId): ?array
             $hostPath = $compressed['path'];
             $hostName = basename($hostPath);
             $mime = $compressed['mime'];
+        } else if (filesize($hostPath) > $maxBytes) {
+            @unlink($hostPath);
+            ss_json_response(413, ['ok' => false, 'error' => 'image_too_large']);
         }
     }
 
