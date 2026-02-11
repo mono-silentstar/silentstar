@@ -122,7 +122,57 @@ SCHEMA REFERENCE
 
 See /claude/schema-draft.md for full table definitions. Summary:
 - events + event_tags: raw log
-- plans: lifecycle-bearing intentions with optional due dates
+- working_memory: active knowledge items (feelings, thoughts, patterns, descs, plans, pins, secrets) with status lifecycle
 - fragments: three-tier knowledge (ambient, recognition, inventory)
 - fragment_sources: which events → which fragment
 - fragment_edges: the graph (source_key, target_key, relation)
+
+---
+
+OUTPUT FORMAT
+
+After your reasoning, emit a single <operations> XML tag containing a JSON array. Each element is an operation object with a "type" field. Put all your reasoning BEFORE the tag — do not interleave.
+
+Operation types:
+
+CREATE_FRAGMENT — create a new fragment
+  { "type": "CREATE_FRAGMENT", "key": "piano", "ambient": "...", "recognition": "...", "inventory": "...", "source_events": [12, 45, 67] }
+  Only "key" and "ambient" are required. "recognition" and "inventory" are optional.
+
+UPDATE_FRAGMENT — update tiers on an existing fragment
+  { "type": "UPDATE_FRAGMENT", "key": "piano", "ambient": "...", "source_events": [89] }
+  Include only the tiers you're changing. Omitted tiers are left untouched.
+
+CREATE_EDGE — add a graph edge between fragments
+  { "type": "CREATE_EDGE", "source_key": "luna", "target_key": "piano", "relation": "plays" }
+
+DELETE_EDGE — remove a graph edge
+  { "type": "DELETE_EDGE", "source_key": "luna", "target_key": "piano" }
+
+UPDATE_WORKING_MEMORY — change status of a working memory item
+  { "type": "UPDATE_WORKING_MEMORY", "id": 5, "status": "resolved" }
+  Valid statuses: active, resolved, dropped, decayed, superseded.
+
+AMBIENT_REWRITE — rewrite ambient.md entirely
+  { "type": "AMBIENT_REWRITE", "content": "full new ambient.md content here" }
+
+FLAG — surface something for Mono's attention
+  { "type": "FLAG", "message": "Luna's recital plan is past due — was it cancelled?" }
+
+Example output:
+
+The events show Luna mentioning a new Chopin piece and three practice sessions. The existing piano fragment needs updating with this. I also notice...
+
+<operations>
+[
+  { "type": "UPDATE_FRAGMENT", "key": "piano", "ambient": "Luna plays piano — grade 7, working on Chopin Ballade No. 1.", "recognition": "...", "source_events": [101, 103, 107] },
+  { "type": "CREATE_EDGE", "source_key": "piano", "target_key": "chopin", "relation": "current piece" }
+]
+</operations>
+
+Rules:
+- Emit exactly one <operations> tag.
+- The JSON must be a valid array. No trailing commas.
+- source_events should reference event IDs from the NEW EVENTS section.
+- For AMBIENT_REWRITE, the content field IS the entire file. Write it complete.
+- If nothing needs to change, emit an empty array: <operations>[]</operations>
