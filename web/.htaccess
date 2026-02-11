@@ -1,7 +1,15 @@
 # Deny access to sensitive files and directories
-<FilesMatch "\.(local\.php|json|lock|jsonl|log)$">
+<FilesMatch "\.(local\.php|lock|jsonl|log)$">
     Require all denied
 </FilesMatch>
+
+# Block all JSON except manifest.json (needed for PWA)
+<FilesMatch "\.json$">
+    Require all denied
+</FilesMatch>
+<Files "manifest.json">
+    Require all granted
+</Files>
 
 # Protect data directory
 <IfModule mod_rewrite.c>
