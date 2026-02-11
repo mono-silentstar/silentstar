@@ -205,8 +205,9 @@ function ss_validate_upload(array $file, string $jobId): ?array
     }
     @chmod($hostPath, 0600);
 
-    // Compress if over Anthropic API 5MB limit
-    $maxBytes = 5 * 1024 * 1024;
+    // Anthropic API 5MB limit is on the base64 string, not raw bytes.
+    // base64 expands by 4/3, so raw limit = 5MB * 3/4 ≈ 3.75MB
+    $maxBytes = (int)floor(5 * 1024 * 1024 * 3 / 4);
     clearstatcache(true, $hostPath);
     $actualSize = filesize($hostPath);
     ss_write_compress_log([

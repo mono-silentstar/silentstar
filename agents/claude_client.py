@@ -187,7 +187,7 @@ def _guess_media_type(path: Path) -> str:
 
 # --- Image compression ---
 
-_IMAGE_MAX_BYTES = 5 * 1024 * 1024  # 5MB Anthropic API limit
+_IMAGE_MAX_BYTES = 5 * 1024 * 1024 * 3 // 4  # API limit is 5MB base64, so ~3.75MB raw
 
 
 def _compress_image(
