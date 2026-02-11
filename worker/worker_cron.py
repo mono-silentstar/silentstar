@@ -395,7 +395,7 @@ def run(cfg: CronConfig) -> int:
 
     # Acquire exclusive lock — if another worker is still running,
     # block until it finishes (zero-gap handoff between cron cycles)
-    lock_path = Path(__file__).parent / "worker.lock"
+    lock_path = Path("/tmp/silentstar-worker.lock")
     lock_fd = open(lock_path, "w")
     fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)  # blocks until free
 
