@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 
 from wake.assemble import assemble, render_system, render_user, WakeConfig
@@ -95,9 +96,10 @@ def _save_recall_results(db_path: Path, results: list[RecallResult]) -> None:
                 }
                 for r in results
             ]
+            now = datetime.now(timezone.utc).isoformat()
             conn.execute(
-                "INSERT OR REPLACE INTO state (key, value) VALUES ('pending_recall', ?)",
-                (json.dumps(data),),
+                "INSERT OR REPLACE INTO state (key, value, updated_at) VALUES ('pending_recall', ?, ?)",
+                (json.dumps(data), now),
             )
         conn.commit()
     finally:
