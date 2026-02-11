@@ -287,16 +287,14 @@ html, body {
 .display-say { }
 
 .display-do {
-  font-style: italic;
   opacity: 0.82;
-  color: var(--text-soft);
+  color: var(--tag-do);
 }
 
 .display-narrate {
-  font-style: italic;
   font-size: 13px;
   opacity: 0.68;
-  color: var(--text-soft);
+  color: var(--tag-narrate);
   letter-spacing: 0.01em;
 }
 
@@ -322,16 +320,14 @@ html, body {
 }
 
 .inline-do {
-  font-style: italic;
   opacity: 0.85;
-  color: var(--text-soft);
+  color: var(--tag-do);
 }
 
 .inline-narrate {
-  font-style: italic;
   font-size: 13px;
   opacity: 0.7;
-  color: var(--text-soft);
+  color: var(--tag-narrate);
 }
 
 .msg-meta {
@@ -525,8 +521,8 @@ time {
 .input-id-strah  { color: #9a6b72; }
 
 /* Format styles in the input */
-.input-fmt-do      { font-style: italic; }
-.input-fmt-narrate { font-style: italic; opacity: 0.75; }
+.input-fmt-do      { color: var(--tag-do); }
+.input-fmt-narrate { color: var(--tag-narrate); opacity: 0.75; }
 
 /* Knowledge tag styles in the input */
 .input-tag-plan { border-bottom: 2px dashed var(--tag-plan); background: rgba(184, 154, 106, 0.08); padding: 0 2px; border-radius: 2px; }

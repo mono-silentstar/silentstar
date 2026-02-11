@@ -251,10 +251,13 @@
     }
 
     // 3. Merge adjacent spans with identical state
-    let child = msgInput.firstElementChild;
+    // Use nextSibling (not nextElementSibling) so BRs and text nodes
+    // between spans correctly prevent merging across boundaries.
+    let child = msgInput.firstChild;
     while (child) {
-      const next = child.nextElementSibling;
-      if (next && child.tagName === 'SPAN' && next.tagName === 'SPAN' &&
+      const next = child.nextSibling;
+      if (next && child.nodeType === Node.ELEMENT_NODE && child.tagName === 'SPAN' &&
+          next.nodeType === Node.ELEMENT_NODE && next.tagName === 'SPAN' &&
           segmentState(child) === segmentState(next)) {
         while (next.firstChild) child.appendChild(next.firstChild);
         next.remove();
@@ -334,6 +337,17 @@
   });
 
   // --- Input event handlers ---
+
+  // Wrap bare text nodes created by the browser (e.g. after select-all + delete)
+  msgInput.addEventListener('input', () => {
+    for (const child of Array.from(msgInput.childNodes)) {
+      if (child.nodeType === Node.TEXT_NODE) {
+        const span = createSpan();
+        child.before(span);
+        span.appendChild(child);
+      }
+    }
+  });
 
   // Strip paste to plain text
   msgInput.addEventListener('paste', ev => {
@@ -719,8 +733,8 @@
 
   function md(html) {
     return html
-      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-      .replace(/\*(.+?)\*/g, '<em>$1</em>');
+      .replace(/\*\*(.+?)\*\*/gs, '<strong>$1</strong>')
+      .replace(/\*(.+?)\*/gs, '<em>$1</em>');
   }
 
   // --- Bridge status polling ---

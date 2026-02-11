@@ -263,8 +263,8 @@ function ss_render_segments(array $segments): string
 function ss_render_markdown(string $text): string
 {
     // **bold** then *italic* — order matters
-    $text = preg_replace('/\*\*(.+?)\*\*/', '<strong>$1</strong>', $text);
-    $text = preg_replace('/\*(.+?)\*/', '<em>$1</em>', $text);
+    $text = preg_replace('/\*\*(.+?)\*\*/s', '<strong>$1</strong>', $text);
+    $text = preg_replace('/\*(.+?)\*/s', '<em>$1</em>', $text);
     return $text;
 }
 
