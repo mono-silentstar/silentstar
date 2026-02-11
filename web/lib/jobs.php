@@ -205,13 +205,68 @@ function ss_validate_upload(array $file, string $jobId): ?array
     }
     @chmod($hostPath, 0600);
 
+    // Compress if over Anthropic API 5MB limit
+    $maxBytes = 5 * 1024 * 1024;
+    if (filesize($hostPath) > $maxBytes) {
+        $compressed = ss_compress_image($hostPath, $mime, $maxBytes);
+        if ($compressed !== null) {
+            $hostPath = $compressed['path'];
+            $hostName = basename($hostPath);
+            $mime = $compressed['mime'];
+        }
+    }
+
     return [
         'original_name' => $origName,
         'mime_type'      => $mime,
-        'size_bytes'     => (int)($file['size'] ?? 0),
+        'size_bytes'     => (int)filesize($hostPath),
         'host_path'      => $hostPath,
         'host_name'      => $hostName,
     ];
+}
+
+function ss_compress_image(string $path, string $mime, int $maxBytes): ?array
+{
+    $gd = match ($mime) {
+        'image/jpeg' => @imagecreatefromjpeg($path),
+        'image/png'  => @imagecreatefrompng($path),
+        'image/gif'  => @imagecreatefromgif($path),
+        'image/webp' => function_exists('imagecreatefromwebp') ? @imagecreatefromwebp($path) : false,
+        default      => false,
+    };
+    if ($gd === false) return null;
+
+    $w = imagesx($gd);
+    $h = imagesy($gd);
+    $outPath = preg_replace('/\.[^.]+$/', '.jpg', $path);
+
+    // Try JPEG at decreasing quality
+    foreach ([85, 70, 50] as $q) {
+        imagejpeg($gd, $outPath, $q);
+        if (filesize($outPath) <= $maxBytes) {
+            if ($outPath !== $path) @unlink($path);
+            imagedestroy($gd);
+            return ['path' => $outPath, 'mime' => 'image/jpeg'];
+        }
+    }
+
+    // Scale down progressively
+    foreach ([0.75, 0.5, 0.35, 0.25] as $scale) {
+        $nw = (int)($w * $scale);
+        $nh = (int)($h * $scale);
+        $scaled = imagecreatetruecolor($nw, $nh);
+        imagecopyresampled($scaled, $gd, 0, 0, 0, 0, $nw, $nh, $w, $h);
+        imagejpeg($scaled, $outPath, 70);
+        imagedestroy($scaled);
+        if (filesize($outPath) <= $maxBytes) {
+            if ($outPath !== $path) @unlink($path);
+            imagedestroy($gd);
+            return ['path' => $outPath, 'mime' => 'image/jpeg'];
+        }
+    }
+
+    imagedestroy($gd);
+    return null;
 }
 
 function ss_delete_upload(array $job): void
