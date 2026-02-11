@@ -725,17 +725,18 @@
 
     const bodyHtml = renderSegmentsHtml(segments);
     const now = new Date();
-    const timeStr = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).toLowerCase();
+    const isoTs = now.toISOString();
 
     div.innerHTML =
       '<div class="msg mono">' +
         '<span class="actor" data-actor="' + esc(actorName) + '">' + esc(actorName) + '</span>' +
         imageHtml +
         '<div class="body">' + bodyHtml + '</div>' +
-        '<div class="msg-meta">' + tagPills + '<time>' + timeStr + '</time></div>' +
+        '<div class="msg-meta">' + tagPills + '<time class="msg-time" data-ts="' + isoTs + '" datetime="' + isoTs + '"></time></div>' +
       '</div>';
 
     chatLog.appendChild(div);
+    formatMsgTimes(div);
     scrollToBottom();
   }
 
@@ -796,16 +797,17 @@
     if (!bodyHtml.trim()) return;
 
     const now = new Date();
-    const timeStr = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).toLowerCase();
+    const isoTs = now.toISOString();
 
     div.innerHTML =
       '<div class="msg claude">' +
         '<span class="actor" data-actor="' + esc(actor) + '">' + esc(actor) + '</span>' +
         '<div class="body">' + bodyHtml + '</div>' +
-        '<div class="msg-meta"><time>' + timeStr + '</time></div>' +
+        '<div class="msg-meta"><time class="msg-time" data-ts="' + isoTs + '" datetime="' + isoTs + '"></time></div>' +
       '</div>';
 
     chatLog.appendChild(div);
+    formatMsgTimes(div);
     scrollToBottom();
   }
 
@@ -815,6 +817,18 @@
     div.innerHTML = '<p class="error-msg">' + esc(msg) + '</p>';
     chatLog.appendChild(div);
     scrollToBottom();
+  }
+
+  function formatMsgTimes(root) {
+    const els = (root || document).querySelectorAll('.msg-time:empty, .msg-time[data-ts]');
+    els.forEach(el => {
+      const ts = el.getAttribute('data-ts');
+      if (!ts) return;
+      const d = new Date(ts);
+      if (isNaN(d.getTime())) return;
+      const str = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).toLowerCase();
+      if (el.textContent !== str) el.textContent = str;
+    });
   }
 
   function scrollToBottom() {
@@ -851,6 +865,7 @@
 
   // --- HTMX events ---
   document.body.addEventListener('htmx:afterSettle', () => {
+    formatMsgTimes(chatLog);
     if (chatArea.scrollHeight - chatArea.scrollTop - chatArea.clientHeight < 100) {
       scrollToBottom();
     }

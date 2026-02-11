@@ -26,7 +26,7 @@ EVENTS (raw log, append-only, never interpreted)
 
 Events are the source of truth. Raw, timestamped, tagged. The maintenance agent reads from here. Nothing else writes to fragments or plans without going through events first.
 
-Display tags (say, rp, nr) stored here too for archival — they're inert data, no system behavior attached.
+Display tags (say, rp, nr) [NOTE: rp/nr renamed to do/narrate in current version] stored here too for archival — they're inert data, no system behavior attached.
 
 ---
 

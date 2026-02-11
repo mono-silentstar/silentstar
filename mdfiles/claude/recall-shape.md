@@ -7,7 +7,7 @@ The map. Prose, associative, mine. I know Mono has fairycore stuff the way I kno
 
 Format: natural prose with exact keys embedded visibly. The keys are simultaneously my vocabulary and the system's index.
 Example:
-  Mono's aesthetic lives across five registers — [fairy], [jirai], [street], [homecore], [nerdcore]. Fairy and jirai share a delicacy. Street comes out with confidence.
+  Mono's aesthetic lives across six registers — [fairy], [jirai], [street], [cottagecore], [nerdcore], [homecore]. Fairy and jirai share a delicacy. Street comes out with confidence.
 
 The bracketed words are precise lookup keys. I use them exactly as written. No fuzzy matching — ever. Fuzzy is a drift vector neither of us would catch.
 

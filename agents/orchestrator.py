@@ -47,6 +47,7 @@ class TurnResult:
     """What happened in a single conversation turn."""
     response_text: str              # Claude's full response
     display_text: str               # just the say/do/narrate content
+    display_spans: list[dict]       # [{"tag": "say", "content": "..."}]
     actor: str | None               # Claude's identity tag
     turn: int                       # current turn number
     recall_results: list[RecallResult] = field(default_factory=list)
@@ -163,6 +164,7 @@ def turn(
         return TurnResult(
             response_text="",
             display_text="",
+            display_spans=[],
             actor=None,
             turn=mono_result.turn,
             success=False,
@@ -190,15 +192,18 @@ def turn(
     _save_recall_results(config.db_path, recall_results)
 
     # 7. Extract display content for the frontend
+    display_spans = []
     display_parts = []
     for span in response_parsed.spans:
         if span.tag in ("say", "do", "narrate"):
             display_parts.append(span.content)
+            display_spans.append({"tag": span.tag, "content": span.content})
     display_text = "\n".join(display_parts)
 
     return TurnResult(
         response_text=claude_response.text,
         display_text=display_text,
+        display_spans=display_spans,
         actor=response_parsed.actor,
         turn=mono_result.turn,
         recall_results=recall_results,

@@ -73,9 +73,9 @@ Example (partial):
 
   [luna] plays [piano] — grade 7, honestly better. [hasuki] is the one who usually fronts for day-to-day. [strah] comes out when things need protecting.
 
-  Mono's body is one system: [estrogen] timeline, [growth-tracking], [food] patterns. These connect even when they look separate.
+  Mono's body is one system: [estrogen] timeline, [body-tracking], [food] patterns. These connect even when they look separate.
 
-  Aesthetic lives across five registers — [fairy], [jirai], [street], [homecore], [nerdcore]. [fairy] and [jirai] share a delicacy. [street] comes out with confidence.
+  Aesthetic lives across six registers — [fairy], [jirai], [street], [cottagecore], [nerdcore], [homecore]. [fairy] and [jirai] share a delicacy. [street] comes out with confidence.
 
 ---
 

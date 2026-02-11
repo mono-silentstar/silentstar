@@ -151,10 +151,14 @@ class MaintenanceAgent(Agent):
         result.errors.extend(parse_errors)
         result.notes.append(f"Parsed {len(ops)} operations.")
 
-        # --- 7. Apply operations ---
-        _apply_operations(conn, ops, self.ambient_path, result, valid_event_ids)
+        # --- 7. Apply operations (ambient rewrite is buffered, not written yet) ---
+        pending_ambient = _apply_operations(conn, ops, self.ambient_path, result, valid_event_ids)
 
-        # --- 8. Log reasoning as system event ---
+        # --- 8. Defer ambient rewrite until after DB commit ---
+        if pending_ambient is not None:
+            result._post_commit_writes.append((self.ambient_path, pending_ambient))
+
+        # --- 9. Log reasoning as system event ---
         # Extract reasoning (everything before <operations>)
         reasoning = response.text
         ops_match = re.search(r"<operations>", reasoning)
@@ -296,9 +300,15 @@ def _apply_operations(
     ambient_path: Path,
     result: AgentResult,
     valid_event_ids: set[int],
-) -> None:
-    """Apply parsed operations to the database and filesystem."""
+) -> str | None:
+    """Apply parsed operations to the database and filesystem.
+
+    Returns buffered ambient rewrite content (if any) to be written AFTER
+    the DB transaction commits successfully. This prevents filesystem/DB
+    inconsistency if a later operation fails and triggers rollback.
+    """
     now = datetime.now(timezone.utc).isoformat()
+    pending_ambient: str | None = None
 
     for op in ops:
         op_type = op["type"]
@@ -314,13 +324,22 @@ def _apply_operations(
             elif op_type == "UPDATE_WORKING_MEMORY":
                 _apply_update_wm(conn, op, now, result)
             elif op_type == "AMBIENT_REWRITE":
-                _apply_ambient_rewrite(ambient_path, op, result)
+                content = op.get("content", "")
+                if not content.strip():
+                    result.errors.append("AMBIENT_REWRITE with empty content, skipping.")
+                else:
+                    pending_ambient = content
+                    result.notes.append(
+                        f"Buffered ambient.md rewrite ({len(content)} chars)."
+                    )
             elif op_type == "FLAG":
                 result.notes.append(f"FLAG: {op.get('message', '(no message)')}")
         except sqlite3.IntegrityError as e:
             result.errors.append(f"{op_type} integrity error: {e}")
         except Exception as e:
             result.errors.append(f"{op_type} error: {e}")
+
+    return pending_ambient
 
 
 def _apply_create_fragment(
@@ -429,19 +448,6 @@ def _apply_update_wm(
            SET status = ?, resolved_at = COALESCE(?, resolved_at)
            WHERE id = ?""",
         (status, resolved_at, op["id"]),
-    )
-
-
-def _apply_ambient_rewrite(
-    ambient_path: Path, op: dict, result: AgentResult
-) -> None:
-    content = op.get("content", "")
-    if not content.strip():
-        result.errors.append("AMBIENT_REWRITE with empty content, skipping.")
-        return
-    ambient_path.write_text(content, encoding="utf-8")
-    result.notes.append(
-        f"Wrote ambient.md ({len(content)} chars)."
     )
 
 

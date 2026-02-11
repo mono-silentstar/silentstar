@@ -70,7 +70,7 @@ function ss_bridge_is_online(?array $state = null): bool
     if ($lastSeen === '') return false;
     $ts = strtotime($lastSeen);
     if ($ts === false) return false;
-    $ttl = max(1, (int)ss_cfg('bridge_online_ttl_sec', 8));
+    $ttl = max(1, (int)ss_cfg('bridge_online_ttl_sec', 90));
     return (time() - $ts) <= $ttl;
 }
 

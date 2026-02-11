@@ -73,12 +73,20 @@ recall(fairy, deep=True)
 
 Results appear in the **next** turn's context, not the current one. Keys are exact — use the vocabulary from ambient prose.
 
+```
+plans()
+plans(topic="body-tracking")
+plans(when="next week")
+```
+
+Shows all active plans (bypasses submersion), optionally filtered by topic or time window. Results appear in the next turn's context, same as recall.
+
 ---
 
 ## Rules
 
 - One feeling at a time. New feeling replaces old.
 - One identity per message.
-- Tags can nest: `<say><feeling>warm</feeling> hey</say>` works.
+- Tags can appear inside display tags. Both get processed — `<say><feeling>warm</feeling> hey</say>` stores the feeling AND displays the say content. The inner tag markup is stripped from the display.
 - Unknown tags are treated as plain text.
 - Text before the first display tag is processing space — not shown to Mono.

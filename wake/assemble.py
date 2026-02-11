@@ -42,7 +42,7 @@ from .decay import (
     select_within_budget,
 )
 from .recall import RecallResult, NeighborResult
-from .schema import connect, DISPLAY_TAGS, ALL_TAGS
+from .schema import connect, DISPLAY_TAGS, ALL_TAGS, IDENTITY_TAGS
 
 
 # Budget defaults — hard caps for each section.
@@ -143,8 +143,9 @@ def _format_time(now: datetime) -> str:
 
 
 # Regex to strip all known tags from raw content, leaving just the text
+_ALL_STRIP_TAGS = ALL_TAGS | IDENTITY_TAGS
 _TAG_STRIP_RE = re.compile(
-    r"</?(" + "|".join(re.escape(t) for t in ALL_TAGS) + r")>",
+    r"</?(" + "|".join(re.escape(t) for t in _ALL_STRIP_TAGS) + r")>",
 )
 
 # Regex to extract display-tag content only
@@ -204,7 +205,7 @@ def _load_working_memory(
     Fill ratio is informational — how full the WM budget is.
     """
     rows = conn.execute("""
-        SELECT id, type, content, subject, actor, due,
+        SELECT id, type, content, subject, actor, due, turn,
                created_at, refreshed_at
         FROM working_memory
         WHERE status = 'active'
@@ -243,8 +244,11 @@ def _load_working_memory(
         tokens = _estimate_tokens(content)
         total_active_tokens += tokens
 
-        # Estimate what turn this item was created at
-        if turn_rate > 0:
+        # Use stored turn if available, otherwise estimate from time
+        stored_turn = row["turn"]
+        if stored_turn is not None:
+            estimated_turn = stored_turn
+        elif turn_rate > 0:
             age_seconds = max((now - ts).total_seconds(), 0.0)
             estimated_turn = max(0, current_turn - int(age_seconds * turn_rate))
         else:
@@ -565,7 +569,7 @@ def render_user(package: WakePackage) -> str:
     if package.conversation:
         conv_lines = []
         for frag in package.conversation:
-            ts = frag.timestamp.strftime("%-I:%M %p").lower()
+            ts = frag.timestamp.strftime("%I:%M %p").lstrip("0").lower()
             conv_lines.append(f"[{ts}] {frag.content}")
             if frag.image_path:
                 conv_lines.append(f"  [image: {frag.image_path}]")

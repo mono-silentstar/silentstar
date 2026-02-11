@@ -18,7 +18,7 @@ import sqlite3
 from pathlib import Path
 
 
-SCHEMA_VERSION = 2  # bump when schema changes
+SCHEMA_VERSION = 3  # bump when schema changes
 
 
 def connect(db_path: Path) -> sqlite3.Connection:
@@ -26,6 +26,7 @@ def connect(db_path: Path) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute("PRAGMA busy_timeout = 5000")
     return conn
 
 
@@ -49,6 +50,9 @@ def migrate(db_path: Path) -> None:
 
         if current < 2:
             _migrate_v1_to_v2(conn)
+
+        if current < 3:
+            _migrate_v2_to_v3(conn)
 
         # Update version
         conn.execute("DELETE FROM schema_version")
@@ -144,6 +148,7 @@ def _migrate_v1_to_v2(conn: sqlite3.Connection) -> None:
             actor           TEXT,
             status          TEXT NOT NULL DEFAULT 'active',
             due             TEXT,
+            turn            INTEGER,
             created_at      TEXT NOT NULL,
             refreshed_at    TEXT NOT NULL,
             resolved_at     TEXT,
@@ -197,6 +202,15 @@ def _migrate_v1_to_v2(conn: sqlite3.Connection) -> None:
 
         # Keep the old table around renamed, don't destroy data
         conn.execute("ALTER TABLE plans RENAME TO _plans_retired")
+
+
+def _migrate_v2_to_v3(conn: sqlite3.Connection) -> None:
+    """Add turn column to working_memory for accurate creation-turn tracking."""
+
+    # Check if column already exists (safe for re-runs)
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(working_memory)")}
+    if "turn" not in cols:
+        conn.execute("ALTER TABLE working_memory ADD COLUMN turn INTEGER")
 
 
 # Valid types and statuses for working_memory

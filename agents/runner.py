@@ -30,6 +30,8 @@ class AgentResult:
     working_memory_created: int = 0
     errors: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    # Deferred filesystem writes to apply after DB commit
+    _post_commit_writes: list[tuple[Path, str]] = field(default_factory=list)
 
 
 class Agent(ABC):
@@ -62,6 +64,14 @@ class Agent(ABC):
         try:
             result = self.run(conn)
             conn.commit()
+
+            # Apply deferred filesystem writes now that DB is committed
+            for path, content in result._post_commit_writes:
+                try:
+                    path.write_text(content, encoding="utf-8")
+                    result.notes.append(f"Wrote {path.name} ({len(content)} chars).")
+                except Exception as e:
+                    result.errors.append(f"Post-commit write to {path} failed: {e}")
 
             # Log completion
             conn.execute(

@@ -1,7 +1,7 @@
 """
 silentstar cron worker — filesystem-based job processing.
 
-Runs via cron every minute. Internally loops for ~55 seconds with a short
+Runs via cron every minute. Internally loops for ~65 seconds with a short
 sleep, processing any queued jobs from the shared data/jobs/ directory.
 PHP writes job files, this worker reads and processes them directly.
 
@@ -13,7 +13,6 @@ from __future__ import annotations
 import fcntl
 import json
 import os
-import re
 import signal
 import shutil
 import sys
@@ -21,7 +20,6 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
 # Add project root to path
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -103,21 +101,6 @@ def log(msg: str, verbose: bool = True) -> None:
         print(f"[{ts}] {msg}", flush=True)
 
 
-def extract_display_spans(response_text: str) -> list[dict]:
-    """Extract say/do/narrate spans from Claude's raw response."""
-    spans = []
-    pattern = re.compile(
-        r"<(say|do|narrate)>(.*?)</\1>",
-        re.DOTALL,
-    )
-    for match in pattern.finditer(response_text):
-        tag = match.group(1)
-        content = match.group(2).strip()
-        if content:
-            spans.append({"tag": tag, "content": content})
-    return spans
-
-
 def now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
 
@@ -177,7 +160,19 @@ def update_job(jobs_dir: Path, job_id: str, mutator) -> dict | None:
     return updated
 
 
-def claim_job(jobs_dir: Path, job: dict) -> dict | None:
+def with_jobs_lock(state_dir: Path, fn):
+    """Execute fn while holding the jobs lock (shared with PHP)."""
+    lock_path = state_dir / "jobs.lock"
+    lock_path.touch(exist_ok=True)
+    with open(lock_path, "r") as lock_fh:
+        fcntl.flock(lock_fh, fcntl.LOCK_EX)
+        try:
+            return fn()
+        finally:
+            fcntl.flock(lock_fh, fcntl.LOCK_UN)
+
+
+def claim_job(cfg: CronConfig, job: dict) -> dict | None:
     """Claim a queued job by setting it to running."""
     job_id = str(job["id"])
 
@@ -189,14 +184,17 @@ def claim_job(jobs_dir: Path, job: dict) -> dict | None:
         row["worker"] = "cron-worker"
         return row
 
-    claimed = update_job(jobs_dir, job_id, mutator)
+    def do_claim():
+        return update_job(cfg.jobs_dir, job_id, mutator)
+
+    claimed = with_jobs_lock(cfg.state_dir, do_claim)
     if claimed and claimed.get("status") == "running":
         return claimed
     return None
 
 
 def complete_job(
-    jobs_dir: Path,
+    cfg: CronConfig,
     job_id: str,
     status: str = "done",
     display: list[dict] | None = None,
@@ -216,7 +214,7 @@ def complete_job(
         row["turn_id"] = turn_id
         return row
 
-    return update_job(jobs_dir, job_id, mutator)
+    return with_jobs_lock(cfg.state_dir, lambda: update_job(cfg.jobs_dir, job_id, mutator))
 
 
 def append_history(cfg: CronConfig, job: dict, display: list[dict], actor: str) -> None:
@@ -350,7 +348,7 @@ def process_job(cfg: CronConfig, job: dict) -> None:
 
     if not result.success:
         complete_job(
-            cfg.jobs_dir, job_id,
+            cfg, job_id,
             status="error",
             error_message=result.error or "turn failed",
         )
@@ -362,14 +360,14 @@ def process_job(cfg: CronConfig, job: dict) -> None:
     raw = result.response_text
     log(f"raw response ({len(raw)} chars): {raw[:300]}{'...' if len(raw) > 300 else ''}")
 
-    # Extract display spans
-    display = extract_display_spans(result.response_text)
+    # Use pre-parsed display spans from TurnResult
+    display = result.display_spans
     reply_actor = result.actor or "claude"
     turn_id = str(result.turn)
 
     # Complete the job
     updated = complete_job(
-        cfg.jobs_dir, job_id,
+        cfg, job_id,
         status="done",
         display=display,
         actor=reply_actor,
@@ -385,6 +383,24 @@ def process_job(cfg: CronConfig, job: dict) -> None:
     delete_upload(job)
 
     log(f"job {job_id} done (turn {result.turn}, {len(display)} display spans)")
+
+
+def cleanup_old_jobs(jobs_dir: Path, max_age_seconds: int = 300) -> int:
+    """Delete completed/errored job files older than max_age. Returns count deleted."""
+    now = time.time()
+    deleted = 0
+    for path in jobs_dir.glob("*.json"):
+        if path.name.endswith(".tmp"):
+            continue
+        try:
+            data = read_json_file(path)
+            if data and data.get("status") in ("done", "error"):
+                if now - path.stat().st_mtime > max_age_seconds:
+                    path.unlink(missing_ok=True)
+                    deleted += 1
+        except Exception:
+            pass
+    return deleted
 
 
 def run(cfg: CronConfig) -> int:
@@ -411,6 +427,7 @@ def run(cfg: CronConfig) -> int:
     signal.signal(signal.SIGINT, handle_signal)
 
     start = time.monotonic()
+    last_cleanup = 0.0
 
     try:
         while not shutdown:
@@ -418,6 +435,14 @@ def run(cfg: CronConfig) -> int:
             if elapsed >= MAX_RUN_SECONDS:
                 log("time limit reached, exiting")
                 break
+
+            # Periodic cleanup of old completed/errored job files
+            now_mono = time.monotonic()
+            if now_mono - last_cleanup >= 60:
+                n = cleanup_old_jobs(cfg.jobs_dir)
+                if n:
+                    log(f"cleaned up {n} old job files")
+                last_cleanup = now_mono
 
             # Heartbeat — keeps bridge status "online"
             update_bridge_state(cfg, busy=False)
@@ -432,7 +457,7 @@ def run(cfg: CronConfig) -> int:
                 continue
 
             # Claim it
-            claimed = claim_job(cfg.jobs_dir, queued)
+            claimed = claim_job(cfg, queued)
             if claimed is None:
                 continue  # someone else got it
 
@@ -446,7 +471,7 @@ def run(cfg: CronConfig) -> int:
                 if job_id:
                     try:
                         complete_job(
-                            cfg.jobs_dir, job_id,
+                            cfg, job_id,
                             status="error",
                             error_message=str(e),
                         )

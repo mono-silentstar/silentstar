@@ -131,7 +131,7 @@ def ingest(
                 wm_resolved.extend(dropped)
             else:
                 created, superseded = _create_wm_item(
-                    conn, event_id, span, parsed.actor, now
+                    conn, event_id, span, parsed.actor, now, _get_turn(conn)
                 )
                 wm_created.extend(created)
                 wm_superseded.extend(superseded)
@@ -165,6 +165,7 @@ def _create_wm_item(
     span: TaggedSpan,
     actor: str | None,
     now: str,
+    turn: int | None = None,
 ) -> tuple[list[int], list[int]]:
     """Create a new working memory item. Handle supersession for types
     that auto-supersede (feeling, desc)."""
@@ -209,10 +210,10 @@ def _create_wm_item(
     # Create the item
     cursor = conn.execute("""
         INSERT INTO working_memory
-            (event_id, type, content, subject, actor, status, due,
+            (event_id, type, content, subject, actor, status, due, turn,
              created_at, refreshed_at)
-        VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?)
-    """, (event_id, span.tag, span.content, subject, actor, due, now, now))
+        VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?)
+    """, (event_id, span.tag, span.content, subject, actor, due, turn, now, now))
 
     wm_id = cursor.lastrowid
     created.append(wm_id)
@@ -269,6 +270,22 @@ def _match_and_update(
 ) -> list[int]:
     """Find the best-matching active WM item by content similarity,
     then update its status."""
+
+    # Modifier-only (e.g. <plan>done</plan>) — no description to match on.
+    # Resolve the most recently created active item of that type.
+    if not query or not query.strip():
+        row = conn.execute(
+            "SELECT id FROM working_memory WHERE type = ? AND status = 'active' ORDER BY created_at DESC LIMIT 1",
+            (wm_type,),
+        ).fetchone()
+        if row:
+            conn.execute(
+                "UPDATE working_memory SET status = ?, resolved_at = ? WHERE id = ?",
+                (new_status, now, row["id"]),
+            )
+            return [row["id"]]
+        return []
+
     rows = conn.execute(
         "SELECT id, content FROM working_memory WHERE type = ? AND status = 'active'",
         (wm_type,),

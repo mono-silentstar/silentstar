@@ -28,16 +28,16 @@ function ss_append_history(array $entry): void
 function ss_read_history(int $limit = 50, int $offset = 0): array
 {
     $path = ss_history_path();
-    if (!is_file($path)) return [];
+    if (!is_file($path)) return ['entries' => [], 'total' => 0];
 
     $lines = file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-    if (!is_array($lines) || count($lines) === 0) return [];
+    if (!is_array($lines) || count($lines) === 0) return ['entries' => [], 'total' => 0];
 
     // Most recent last — take from end
     $total = count($lines);
     $start = max(0, $total - $limit - $offset);
     $end = $total - $offset;
-    if ($end <= 0) return [];
+    if ($end <= 0) return ['entries' => [], 'total' => $total];
 
     $slice = array_slice($lines, $start, $end - $start);
     $entries = [];
@@ -45,7 +45,7 @@ function ss_read_history(int $limit = 50, int $offset = 0): array
         $decoded = json_decode($line, true);
         if (is_array($decoded)) $entries[] = $decoded;
     }
-    return $entries;
+    return ['entries' => $entries, 'total' => $total];
 }
 
 function ss_history_count(): int
@@ -87,7 +87,7 @@ function ss_render_mono_msg(array $mono, string $ts): string
     $rawText = (string)($mono['text'] ?? '');
     $tags = $mono['tags'] ?? [];
     $image = $mono['image'] ?? null;
-    $time = ss_format_time($ts);
+    $safeTs = htmlspecialchars($ts, ENT_QUOTES);
 
     $tagPills = '';
     if (is_array($tags)) {
@@ -113,7 +113,7 @@ function ss_render_mono_msg(array $mono, string $ts): string
         <span class="actor" data-actor="{$actor}">{$actor}</span>
         {$imageHtml}
         <div class="body">{$bodyHtml}</div>
-        <div class="msg-meta">{$tagPills}<time datetime="{$ts}">{$time}</time></div>
+        <div class="msg-meta">{$tagPills}<time class="msg-time" data-ts="{$safeTs}" datetime="{$safeTs}"></time></div>
       </div>
     </div>
     HTML;
@@ -123,7 +123,7 @@ function ss_render_claude_msg(array $claude, string $ts): string
 {
     $actor = htmlspecialchars((string)($claude['actor'] ?? 'claude'), ENT_QUOTES);
     $display = $claude['display'] ?? [];
-    $time = ss_format_time($ts);
+    $safeTs = htmlspecialchars($ts, ENT_QUOTES);
 
     $bodyHtml = '';
     if (is_array($display)) {
@@ -150,7 +150,7 @@ function ss_render_claude_msg(array $claude, string $ts): string
       <div class="msg claude">
         <span class="actor" data-actor="{$actor}">{$actor}</span>
         <div class="body">{$bodyHtml}</div>
-        <div class="msg-meta"><time datetime="{$ts}">{$time}</time></div>
+        <div class="msg-meta"><time class="msg-time" data-ts="{$safeTs}" datetime="{$safeTs}"></time></div>
       </div>
     </div>
     HTML;

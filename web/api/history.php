@@ -11,7 +11,9 @@ try {
     $limit = max(1, min(200, (int)($_GET['limit'] ?? 50)));
     $offset = max(0, (int)($_GET['offset'] ?? 0));
 
-    $entries = ss_read_history($limit, $offset);
+    $result = ss_read_history($limit, $offset);
+    $entries = $result['entries'];
+    $total = $result['total'];
 
     header('Content-Type: text/html; charset=utf-8');
 
@@ -20,7 +22,6 @@ try {
         exit;
     }
 
-    $total = ss_history_count();
     $hasMore = ($offset + $limit) < $total;
 
     // Render load-more button if there's older history

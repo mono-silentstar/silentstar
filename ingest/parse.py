@@ -158,13 +158,18 @@ def parse_mono_message(
     # Add frontend-toggled tags as spans if not already present
     if tags:
         existing_tags = {s.tag for s in result.spans}
+        # Strip any inline tags from the content for frontend-applied spans
+        _inline_tag_re = re.compile(
+            r"</?(?:" + "|".join(re.escape(t) for t in ALL_TAGS) + r")>"
+        )
+        clean = _inline_tag_re.sub("", text).strip()
         for tag in tags:
             if tag in ALL_TAGS and tag not in existing_tags:
-                # Frontend tag wraps the whole message
+                # Frontend tag wraps the whole message (with inline tags stripped)
                 if tag in DISPLAY_TAGS:
-                    result.spans.append(TaggedSpan(tag=tag, content=text))
+                    result.spans.append(TaggedSpan(tag=tag, content=clean))
                 elif tag in VALID_WM_TYPES:
-                    modifier, content = _extract_modifier(tag, text)
+                    modifier, content = _extract_modifier(tag, clean)
                     result.spans.append(TaggedSpan(
                         tag=tag, content=content, modifier=modifier
                     ))

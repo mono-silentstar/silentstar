@@ -55,7 +55,7 @@ self.addEventListener('fetch', ev => {
 
   // Shell assets — cache-first, fall back to network
   ev.respondWith(
-    caches.match(ev.request).then(cached => {
+    caches.match(ev.request, { ignoreSearch: true }).then(cached => {
       if (cached) {
         // Refresh cache in background
         fetch(ev.request).then(resp => {

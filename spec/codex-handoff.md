@@ -190,7 +190,7 @@ Output protocol: <operations> XML tag with JSON array of ops.
 Op types: CREATE/UPDATE_FRAGMENT, CREATE/DELETE_EDGE, UPDATE_WORKING_MEMORY,
 AMBIENT_REWRITE, FLAG.
 
-See /mdfiles/maintenance-agent.md for full spec.
+See /mdfiles/claude/maintenance-agent.md for full spec.
 
 Schedule: weekly light pass, monthly deep pass, manual on request.
 Run via: python run_maintenance.py --weekly / --monthly

@@ -21,20 +21,22 @@ try {
         ss_json_response(400, ['ok' => false, 'error' => 'empty_message']);
     }
 
+    // Validate upload outside the lock so ss_validate_upload's exit() calls
+    // (via ss_json_response) don't skip lock cleanup.
+    $jobId = ss_random_id(12);
+    $uploadMeta = null;
+    if ($imageProvided && is_array($imageFile)) {
+        $uploadMeta = ss_validate_upload($imageFile, $jobId);
+    }
+
     $job = ss_with_lock('jobs', static function () use (
-        $message, $actor, $tags, $imageProvided, $imageFile
+        $message, $actor, $tags, $jobId, $uploadMeta
     ): array {
         ss_cleanup_stale_jobs();
 
         $active = ss_find_active_job();
         if (is_array($active)) {
-            ss_json_response(409, ['ok' => false, 'error' => 'bridge_busy']);
-        }
-
-        $jobId = ss_random_id(12);
-        $uploadMeta = null;
-        if ($imageProvided && is_array($imageFile)) {
-            $uploadMeta = ss_validate_upload($imageFile, $jobId);
+            throw new RuntimeException('bridge_busy');
         }
 
         $now = ss_now_iso();
@@ -66,6 +68,11 @@ try {
         'ok'     => true,
         'job_id' => $job['id'],
     ]);
+} catch (RuntimeException $e) {
+    if ($e->getMessage() === 'bridge_busy') {
+        ss_json_response(409, ['ok' => false, 'error' => 'bridge_busy']);
+    }
+    ss_json_response(500, ['ok' => false, 'error' => $e->getMessage()]);
 } catch (Throwable $e) {
     ss_json_response(500, ['ok' => false, 'error' => $e->getMessage()]);
 }
