@@ -113,17 +113,22 @@ def _send_api(
 
         # Anthropic API limit: 5MB per image
         if len(raw_bytes) > _IMAGE_MAX_BYTES:
-            raw_bytes, media_type = _compress_image(raw_bytes, media_type)
+            try:
+                raw_bytes, media_type = _compress_image(raw_bytes, media_type)
+            except Exception:
+                pass  # compression failed, check size below
 
-        image_data = base64.standard_b64encode(raw_bytes).decode("utf-8")
-        content.append({
-            "type": "image",
-            "source": {
-                "type": "base64",
-                "media_type": media_type,
-                "data": image_data,
-            },
-        })
+        if len(raw_bytes) <= _IMAGE_MAX_BYTES:
+            image_data = base64.standard_b64encode(raw_bytes).decode("utf-8")
+            content.append({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": media_type,
+                    "data": image_data,
+                },
+            })
+        # else: image too large even after compression — skip it, send text only
 
     content.append({"type": "text", "text": user_message})
 
