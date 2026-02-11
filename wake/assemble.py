@@ -550,7 +550,8 @@ def render_user(package: WakePackage) -> str:
     if package.conversation:
         conv_lines = []
         for frag in package.conversation:
-            conv_lines.append(frag.content)
+            ts = frag.timestamp.strftime("%-I:%M %p").lower()
+            conv_lines.append(f"[{ts}] {frag.content}")
             if frag.image_path:
                 conv_lines.append(f"  [image: {frag.image_path}]")
         sections.append("Recent:\n" + "\n".join(conv_lines))
