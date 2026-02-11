@@ -15,6 +15,7 @@ try {
         'ok'     => true,
         'online' => $online,
         'busy'   => (bool)($state['busy'] ?? false),
+        'v'      => 2,
     ]);
 } catch (Throwable $e) {
     ss_json_response(500, ['ok' => false, 'error' => $e->getMessage()]);
