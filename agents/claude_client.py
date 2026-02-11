@@ -19,6 +19,7 @@ how the prompt gets to Claude and back.
 from __future__ import annotations
 
 import base64
+import io
 import json
 import os
 import subprocess
@@ -107,10 +108,14 @@ def _send_api(
     content: list[dict] = []
 
     if image_path and image_path.exists():
-        image_data = base64.standard_b64encode(
-            image_path.read_bytes()
-        ).decode("utf-8")
+        raw_bytes = image_path.read_bytes()
         media_type = _guess_media_type(image_path)
+
+        # Anthropic API limit: 5MB per image
+        if len(raw_bytes) > _IMAGE_MAX_BYTES:
+            raw_bytes, media_type = _compress_image(raw_bytes, media_type)
+
+        image_data = base64.standard_b64encode(raw_bytes).decode("utf-8")
         content.append({
             "type": "image",
             "source": {
@@ -173,6 +178,48 @@ def _guess_media_type(path: Path) -> str:
         ".gif": "image/gif",
         ".webp": "image/webp",
     }.get(suffix, "image/jpeg")
+
+
+# --- Image compression ---
+
+_IMAGE_MAX_BYTES = 5 * 1024 * 1024  # 5MB Anthropic API limit
+
+
+def _compress_image(
+    raw_bytes: bytes, media_type: str
+) -> tuple[bytes, str]:
+    """Compress an image to fit within the API size limit."""
+    from PIL import Image
+
+    img = Image.open(io.BytesIO(raw_bytes))
+    if img.mode in ("RGBA", "P"):
+        img = img.convert("RGB")
+
+    # Try JPEG at decreasing quality levels
+    for quality in (85, 70, 50):
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=quality)
+        if buf.tell() <= _IMAGE_MAX_BYTES:
+            return buf.getvalue(), "image/jpeg"
+
+    # Still too large — scale down
+    for scale in (0.75, 0.5, 0.35):
+        scaled = img.resize(
+            (int(img.width * scale), int(img.height * scale)),
+            Image.LANCZOS,
+        )
+        buf = io.BytesIO()
+        scaled.save(buf, format="JPEG", quality=70)
+        if buf.tell() <= _IMAGE_MAX_BYTES:
+            return buf.getvalue(), "image/jpeg"
+
+    # Last resort — return whatever we have
+    buf = io.BytesIO()
+    img.resize(
+        (int(img.width * 0.25), int(img.height * 0.25)),
+        Image.LANCZOS,
+    ).save(buf, format="JPEG", quality=60)
+    return buf.getvalue(), "image/jpeg"
 
 
 # --- CLI transport (fallback) ---
