@@ -6,16 +6,17 @@
  * chat app, not an offline reader.
  */
 
-const CACHE_NAME = 'silentstar-v1';
+const CACHE_NAME = 'silentstar-v2';
+const BASE = '/silentstar/';
 
 const SHELL_ASSETS = [
-  '/',
-  '/static/style.css',
-  '/static/chat.js',
-  '/static/space.js',
-  '/static/icon.svg',
-  '/static/icon-192.png',
-  '/static/icon-512.png',
+  BASE,
+  BASE + 'static/style.css',
+  BASE + 'static/chat.js',
+  BASE + 'static/space.js',
+  BASE + 'static/icon.svg',
+  BASE + 'static/icon-192.png',
+  BASE + 'static/icon-512.png',
 ];
 
 // Install: pre-cache the shell
@@ -47,7 +48,7 @@ self.addEventListener('fetch', ev => {
   const url = new URL(ev.request.url);
 
   // API calls, form submissions, HTMX requests — always network
-  if (url.pathname.startsWith('/api/') ||
+  if (url.pathname.startsWith(BASE + 'api/') ||
       ev.request.method !== 'GET') {
     return;
   }
