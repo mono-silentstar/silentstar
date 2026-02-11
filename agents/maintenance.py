@@ -360,7 +360,7 @@ def _apply_create_fragment(
     )
     result.fragments_created += 1
 
-    _link_source_events(conn, key, op.get("source_events", []), valid_event_ids)
+    _link_source_events(conn, key, op.get("source_events", []), valid_event_ids, result)
 
 
 def _apply_update_fragment(
@@ -386,7 +386,7 @@ def _apply_update_fragment(
     )
     result.fragments_updated += 1
 
-    _link_source_events(conn, key, op.get("source_events", []), valid_event_ids)
+    _link_source_events(conn, key, op.get("source_events", []), valid_event_ids, result)
 
 
 def _apply_create_edge(
@@ -450,12 +450,17 @@ def _link_source_events(
     fragment_key: str,
     source_events: list,
     valid_event_ids: set[int],
+    result: AgentResult | None = None,
 ) -> None:
     """Link fragment to source events, filtering to known valid IDs."""
     for eid in source_events:
         if not isinstance(eid, int):
+            if result:
+                result.errors.append(f"source_event {eid!r} is not an int, skipping")
             continue
         if eid not in valid_event_ids:
+            if result:
+                result.errors.append(f"source_event {eid} not in valid window, skipping")
             continue
         conn.execute(
             """INSERT OR IGNORE INTO fragment_sources

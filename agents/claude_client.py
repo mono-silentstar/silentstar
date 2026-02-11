@@ -212,13 +212,14 @@ def _send_cli(
         f.write(full_prompt)
         f.flush()
 
-        result = subprocess.run(
-            cmd,
-            stdin=open(f.name, "r", encoding="utf-8"),
-            capture_output=True,
-            text=True,
-            timeout=config.timeout_seconds,
-        )
+        with open(f.name, "r", encoding="utf-8") as stdin_file:
+            result = subprocess.run(
+                cmd,
+                stdin=stdin_file,
+                capture_output=True,
+                text=True,
+                timeout=config.timeout_seconds,
+            )
 
     if result.returncode != 0:
         return ClaudeResponse(

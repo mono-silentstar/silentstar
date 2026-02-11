@@ -1,138 +1,177 @@
-CODEX HANDOFF — what you need to build around the wake module
+INTEGRATION REFERENCE — how the pieces connect
 
-The wake assembly module (/wake/) handles context construction. You handle everything else: database scaffolding, event ingestion, frontend, and orchestration.
+This is a reference for any future AI that needs to understand or build against the silentstar system. The wake module (/wake/) handles context assembly. The agents module (/agents/) handles orchestration and Claude API calls. The ingest module (/ingest/) handles event creation and working memory lifecycle.
 
-Read these first:
-- /claude/schema-draft.md — database tables
-- /claude/recall-shape.md — architecture overview
+Read these for details:
+- /wake/schema.py — database tables, constants, migration logic
+- /agents/orchestrator.py — the turn() pipeline
+- /ingest/lifecycle.py — event + working memory creation
 - /claude/maintenance-agent.md — the maintenance agent spec
 
 ---
 
 FRONTEND LIVE TAGS
 
-Two categories of toggles for the chat interface:
+Three categories of toggles for the chat interface:
 
 Identity (who's fronting — radio buttons, one at a time):
   hasuki, renki, luna, chloe, strah          — Mono's system members
   claude, y'lhara                             — Claude's activations
 
-Content (what kind of message — toggleable, multiple allowed):
+Content (working memory types — toggleable):
   plan    — persistent intention. If time language is present ("tuesday",
-            "in 2 hours", "next week"), parse it into a due timestamp.
-            Use dateparser (Python) or equivalent.
-  secret  — hidden from Mono. Persists until Claude reveals it.
+            "in 2 hours", "next week"), dateparser extracts a due timestamp.
+  pin     — persistent note. Stays until explicitly dropped.
+  (Other WM types — feeling, thought, pattern, desc, secret — are used
+   inline in Claude's responses, not as frontend toggles.)
 
-Display (rendering hints — toggleable, stored for archival, no system behavior):
+Display (rendering hints — stored in event_tags, no working memory record):
   say     — spoken dialogue
-  rp      — action/roleplay
-  nr      — narration/environment
+  do      — action/roleplay
+  narrate — narration/environment
 
-Identity tag → stored in events.actor
-Content tags → stored in event_tags table
-Display tags → stored in event_tags table (inert — for future conversation replay)
+Identity tag -> stored in events.actor
+Content tags -> create working_memory records via ingest/lifecycle.py
+Display tags -> stored in event_tags table (inert — for conversation replay)
+
+Constants for all of these live in wake/schema.py:
+  VALID_WM_TYPES   = {feeling, thought, pattern, desc, plan, pin, secret}
+  DISPLAY_TAGS     = {say, do, narrate}
+  IDENTITY_TAGS    = {hasuki, renki, luna, chloe, strah, claude, y'lhara}
 
 ---
 
 EVENT INGESTION
 
-When a message is sent (from Mono or from Claude's response):
+When a message is ingested (from Mono or from Claude's response), ingest() in
+ingest/lifecycle.py does:
 
 1. INSERT into events:
-   - ts: UTC timestamp (now)
+   - ts: UTC ISO timestamp
    - content: raw message text, untouched
    - actor: identity tag value (e.g., "luna", "claude"), nullable
-   - image_path: path to stored image file if message has an attachment, NULL otherwise
+   - image_path: path to stored image file if present, NULL otherwise
 
-2. INSERT into event_tags (one row per tag):
-   - event_id: the event we just created
-   - tag: each active content/display tag (e.g., "plan", "secret", "rp")
+2. INSERT into event_tags (one row per active tag):
+   - event_id + tag (composite key)
+   - Includes both display tags and WM-type tags
 
-3. If "plan" tag is active:
-   - INSERT into plans:
-     - event_id: source event
-     - actor: who the plan is for (from identity tag)
-     - summary: the message content (or extracted plan text)
-     - due: parsed timestamp if time language detected, NULL otherwise
-     - status: "active"
-     - created_at: now
+3. For each tagged span that is a VALID_WM_TYPE:
+   - If modifier is "resolve" or "cancel": find best-matching active plan
+     by fuzzy word-overlap and update its status
+   - If modifier is "drop": find best-matching active pin and drop it
+   - Otherwise: INSERT into working_memory:
+     - event_id, type, content, subject, actor, status='active'
+     - due: parsed via dateparser for plans, NULL otherwise
+     - created_at, refreshed_at: now
+   - Supersession rules:
+     - feeling: supersedes ALL active feelings (only one at a time)
+     - desc: supersedes active descs with same subject
+   - Fragment linking: if content mentions a known fragment key, a row is
+     added to working_memory_refs (wm_id, fragment_key)
 
-Time parsing: Use dateparser or similar. Parse relative to current time.
-"tuesday" → next Tuesday. "in 2 hours" → now + 2h. "daily" → flag as
-recurring (future iteration — for now, just store the next occurrence).
+4. Turn counter: incremented for Mono messages only (not Claude responses).
+   Stored in state table with key='current_turn'.
 
 ---
 
 INTEGRATION WITH /wake/
 
-On each new message from Mono:
+On each new message from Mono, the orchestrator runs turn():
 
 ```python
-from wake.assemble import assemble, render, WakeConfig
-from wake.recall import recall, recall_multi
-from pathlib import Path
+from wake.assemble import assemble, render_system, render_user, WakeConfig
+from wake.recall import recall, RecallResult
 
-config = WakeConfig(
-    db_path=Path("path/to/db.sqlite"),
-    wake_context_path=Path("claude/wake-context.md"),
-    ambient_path=Path("ambient.md"),
+# WakeConfig holds all paths + budget settings
+wake_config = WakeConfig(
+    db_path=config.db_path,
+    wake_context_path=config.wake_context_path,
+    wake_context_image_path=config.wake_context_image_path,
+    ambient_path=config.ambient_path,
 )
 
-# If Claude used recall() in her previous response, pass those results in
-previous_recall = []  # or populated from Claude's last turn
+# Load any recall results persisted from the previous turn
+previous_recall = _load_recall_results(config.db_path)  # from state table
 
 package = assemble(
-    config=config,
-    hot_context=mono_current_message,
-    current_turn=current_turn_number,
+    wake_config,
+    hot_context=hot,              # "actor: message" string
+    current_turn=mono_result.turn,
     recall_results=previous_recall,
+    image_path=image_path,        # path string or None
 )
 
-prompt = render(package)
-# → send prompt to Claude API
-# Note: render() outputs image references as [image: /path/to/file]
-# Your API layer should parse these and convert to multimodal content blocks
-# (base64-encoded image + text) when calling the Claude API.
+# Two render functions — system prompt and user message are separate
+system_prompt = render_system(package)   # activation + image context
+user_message = render_user(package)      # ambient, WM, conversation, hot
+
+# Send to Claude API
+claude_response = send(user_message, config.claude_config, img,
+                       system_prompt=system_prompt)
 ```
 
-When Claude's response contains a recall request:
-```python
-from wake.recall import recall
+render_system() outputs the activation context (wake-context.md, plus
+conditional image context). This becomes the API system parameter.
 
-result = recall("fairy", db_path=config.db_path)
-# result feeds into next assemble() call as recall_results
-```
+render_user() outputs everything else: self-state, working memory,
+recall results, conversation history, current time, hot context.
+This becomes the user message.
+
+When Claude's response contains recall requests, they're parsed and
+executed against the fragment graph. Results are persisted in the state
+table (key='pending_recall') for inclusion in the next turn's context.
 
 ---
 
 TURN TRACKING
 
-Simple integer counter. Increment on each Mono message (not Claude responses).
-Store as a row in a metadata/state table, or track in application state.
-The wake module receives current_turn as a parameter — it doesn't own the counter.
+Integer counter. Incremented on each Mono message (not Claude responses).
+Stored in the state table with key='current_turn' (value is a string of
+the integer). The wake module receives current_turn as a parameter to
+assemble() — it uses it for decay scoring but doesn't own the counter.
+
+Read/write via _get_turn() and _set_turn() in ingest/lifecycle.py.
 
 ---
 
 MAINTENANCE AGENT
 
-Trigger on schedule:
+agents/maintenance.py — MaintenanceAgent class. Fully wired to the Claude
+API via agents/claude_client.py.
+
+Entry point: run_maintenance.py (CLI: --weekly or --monthly).
+
+Run types:
 - Weekly: light pass (process new events, update fragments, quick ambient rewrite)
 - Monthly: deep pass (review all fragments, restructure, full ambient rewrite)
-- Manual: Mono can invoke for specific cleanup
+- Bootstrap: initial population from existing files
 
 The agent reads /claude/maintenance-agent.md as its wake file.
 It reads from events, writes to fragments + fragment_edges + fragment_sources.
 It generates ambient.md.
 
-For initial population (first run): point the agent at existing /claude/*.md
-files instead of the events table. Same compilation logic, different source.
+Output protocol: <operations> XML tag containing a JSON array of operation
+objects. Op types: CREATE_FRAGMENT, UPDATE_FRAGMENT, CREATE_EDGE,
+DELETE_EDGE, UPDATE_WORKING_MEMORY, AMBIENT_REWRITE, FLAG.
 
 ---
 
-AMBIENT.MD LOCATION
+IMAGES
 
-Lives at project root or a configured path. The wake module reads it via
-WakeConfig.ambient_path. The maintenance agent writes it. Nothing else touches it.
+Images are stored as files. The path is passed as image_path through the
+full pipeline: turn() -> ingest() -> assemble() -> send().
+
+In claude_client.py, the image is base64-encoded and sent as a multimodal
+content block in the API request (image block + text block). MIME type is
+guessed from the file extension.
+
+The wake module accounts for image token cost (~1200 tokens) when building
+the conversation budget. Image context (from wake_context_image_path) is
+conditionally included in the system prompt when an image is present.
+
+The maintenance agent can also see images when compiling events into
+fragments — image descriptions become knowledge.
 
 ---
 
@@ -141,22 +180,3 @@ WHAT YOU DON'T NEED TO TOUCH
 - /wake/ — the assembly module. Already built. Import and call it.
 - /claude/wake-context.md — Claude's identity file. Mono maintains this.
 - /claude/maintenance-agent.md — the agent spec. Already written.
-
-Your job: database, ingestion pipeline, frontend, orchestration, scheduling.
-
----
-
-IMAGES
-
-Images are sent via the frontend and stored as files (e.g., /img-dump/).
-The file path is stored in events.image_path. The wake module accounts for
-image token cost (~1200 tokens per image) when filling the conversation budget.
-
-render() outputs image references as [image: /path/to/file] in the text.
-Your API integration layer should:
-1. Parse these markers from the rendered prompt
-2. Load the image file and base64-encode it
-3. Send as multimodal content blocks to the Claude API
-
-The maintenance agent (also Claude, also multimodal) can see images when
-compiling — "Mono sent a photo of a new jirai piece" can become knowledge.

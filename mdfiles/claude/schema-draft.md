@@ -1,3 +1,11 @@
+> HISTORICAL — this was the v1 schema draft. The actual implemented
+> schema is in wake/schema.py (now at v2). Key differences:
+> - plans table replaced by working_memory (supports all WM types)
+> - display tags are say/do/narrate (not rp/nr)
+> - state table added for metadata (turn counter, recall persistence)
+> - working_memory_refs table added for fragment linking
+> - maintenance_runs table added
+
 SCHEMA DRAFT — first pass
 
 ---

@@ -309,14 +309,14 @@ html, body {
   background: rgba(184, 154, 106, 0.12);
   border-left: 2px solid var(--tag-plan);
   padding-left: 8px;
-  display: inline;
+  display: inline-block;
 }
 
 .inline-pin {
   background: rgba(122, 157, 184, 0.12);
   border-left: 2px solid var(--tag-pin);
   padding-left: 8px;
-  display: inline;
+  display: inline-block;
 }
 
 .inline-do {

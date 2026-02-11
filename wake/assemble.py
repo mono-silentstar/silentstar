@@ -211,6 +211,14 @@ def _load_working_memory(
         ORDER BY refreshed_at DESC
     """).fetchall()
 
+    # Estimate turn rate for WM items (they don't store creation turn)
+    first_row = conn.execute("SELECT MIN(ts) FROM events").fetchone()
+    turn_rate = 0.0  # turns per second
+    if first_row and first_row[0] and current_turn > 0:
+        first_ts = datetime.fromisoformat(first_row[0]).replace(tzinfo=timezone.utc)
+        total_seconds = max((now - first_ts).total_seconds(), 1.0)
+        turn_rate = current_turn / total_seconds
+
     fragments = []
     total_active_tokens = 0
 
@@ -235,10 +243,17 @@ def _load_working_memory(
         tokens = _estimate_tokens(content)
         total_active_tokens += tokens
 
+        # Estimate what turn this item was created at
+        if turn_rate > 0:
+            age_seconds = max((now - ts).total_seconds(), 0.0)
+            estimated_turn = max(0, current_turn - int(age_seconds * turn_rate))
+        else:
+            estimated_turn = current_turn
+
         frag = ContextFragment(
             content=content,
             timestamp=ts,
-            turn_number=current_turn,  # WM items don't have turn numbers
+            turn_number=estimated_turn,
             persistence=persistence,
             refreshed_at=refreshed,
             due=due,
@@ -299,13 +314,13 @@ def _load_conversation(
         tags = [t.strip() for t in tags if t.strip()]
 
         ts = datetime.fromisoformat(row["ts"]).replace(tzinfo=timezone.utc)
-        actor = row["actor"] or ""
+        actor = row["actor"]
         img = row["image_path"] or None
-        is_claude = (actor == "claude")
+        is_claude = actor is None or actor in ("claude", "y'lhara")
 
         if not is_claude:
             # Mono's entire message → mono pool
-            content = _extract_display_content(row["content"], actor)
+            content = _extract_display_content(row["content"], actor or "mono")
             if not content:
                 continue
 

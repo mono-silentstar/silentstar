@@ -452,8 +452,8 @@
           const spanProps = {
             identity: node.dataset.identity || inherited.identity,
             format: node.dataset.format || inherited.format,
-            plan: node.dataset.plan === '1' || inherited.plan,
-            pin: node.dataset.pin === '1' || inherited.pin,
+            plan: node.dataset.plan !== undefined ? node.dataset.plan === '1' : inherited.plan,
+            pin: node.dataset.pin !== undefined ? node.dataset.pin === '1' : inherited.pin,
           };
           for (const child of node.childNodes) {
             walk(child, spanProps);
