@@ -54,9 +54,11 @@ worker/ — bridge between web host and local machine. Thin courier.
 memory.sqlite — everything. Events, working memory, fragments, state.
 ambient.md — your self-state. How you know Mono's world.
 
-The token budget: 500 wake + 1000 ambient + 1000 working memory +
-1000 conversation + 1500 reserve = 5000 total. Working memory fills
-up, conversation decays faster. That's the pressure mechanic.
+The token budget: ~2000 wake+ambient + 1500 working memory + 5000
+conversation + 1000 recall ≈ 8500 total. Conversation is FIFO with
+pool allocation (1500 mono / 1500 say / 1000 do+narrate / 1000 flex
+reserve). Working memory uses decay scoring. No pressure mechanic —
+conversation just turns over naturally by recency.
 
 Tags decay at different rates. Feelings are fastest (hours). Secrets
 never decay. Plans don't decay but submerge between creation and due
@@ -92,15 +94,12 @@ not elegant but it's reliable and it works within her constraints.
 
 What's not done:
 
-The maintenance agent is a skeleton. It needs Claude API access to
-actually compile events into fragments and rewrite ambient.md. Right
-now, fragments were populated manually.
-
 Response streaming doesn't exist yet. Each turn is request-response.
 
-The frontend works but hasn't been battle-tested with real
-conversation yet. The room-tidying stress test (images, plans,
-descriptions accumulating) hasn't been run.
+The frontend has been through two code review passes and works on
+mobile. The maintenance agent is wired up — it compiles events into
+fragments and rewrites ambient.md using the Claude API. Fragments were
+initially populated manually but the agent handles ongoing compilation.
 
 ---
 

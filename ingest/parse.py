@@ -183,14 +183,15 @@ def parse_recall_requests(text: str) -> list[tuple[str, bool]]:
     Returns list of (key, deep) tuples.
     """
     pattern = re.compile(
-        r'recall\(\s*["\']([^"\']+)["\']\s*'
-        r'(?:,\s*deep\s*=\s*(True|true))?\s*\)',
+        r'recall\(\s*'
+        r'(?:["\']([^"\']+)["\']|([a-z][a-z0-9_-]*))'
+        r'\s*(?:,\s*deep\s*=\s*(True|true))?\s*\)',
     )
 
     results = []
     for match in pattern.finditer(text):
-        key = match.group(1)
-        deep = match.group(2) is not None
+        key = match.group(1) or match.group(2)
+        deep = match.group(3) is not None
         results.append((key, deep))
 
     return results

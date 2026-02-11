@@ -280,8 +280,8 @@ def _load_conversation(
         SELECT e.id, e.ts, e.content, e.actor, e.image_path,
                GROUP_CONCAT(t.tag) as tags
         FROM events e
-        INNER JOIN event_tags t ON t.event_id = e.id
-        WHERE t.tag IN ('say', 'do', 'narrate')
+        LEFT JOIN event_tags t ON t.event_id = e.id AND t.tag IN ('say', 'do', 'narrate')
+        WHERE t.tag IS NOT NULL OR e.actor IS NOT NULL
         GROUP BY e.id
         ORDER BY e.ts DESC
         LIMIT 200

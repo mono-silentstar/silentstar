@@ -15,12 +15,13 @@ One function: turn(). Everything else is internal.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from wake.assemble import assemble, render_system, render_user, WakeConfig
-from wake.recall import recall, RecallResult
-from wake.schema import migrate
+from wake.recall import recall, RecallResult, NeighborResult
+from wake.schema import connect, migrate
 from ingest.parse import (
     parse_mono_message,
     parse_response,
@@ -50,6 +51,57 @@ class TurnResult:
     recall_results: list[RecallResult] = field(default_factory=list)
     success: bool = True
     error: str | None = None
+
+
+def _load_recall_results(db_path: Path) -> list[RecallResult]:
+    """Load pending recall results from the state table."""
+    conn = connect(db_path)
+    try:
+        row = conn.execute(
+            "SELECT value FROM state WHERE key = 'pending_recall'"
+        ).fetchone()
+        if not row:
+            return []
+        data = json.loads(row["value"])
+        results = []
+        for item in data:
+            neighbors = [
+                NeighborResult(key=n["key"], ambient=n["ambient"], relation=n["relation"])
+                for n in item.get("neighbors", [])
+            ]
+            results.append(RecallResult(
+                key=item["key"], content=item["content"],
+                depth=item["depth"], neighbors=neighbors,
+            ))
+        return results
+    finally:
+        conn.close()
+
+
+def _save_recall_results(db_path: Path, results: list[RecallResult]) -> None:
+    """Persist recall results in state table for next turn, or clear if empty."""
+    conn = connect(db_path)
+    try:
+        if not results:
+            conn.execute("DELETE FROM state WHERE key = 'pending_recall'")
+        else:
+            data = [
+                {
+                    "key": r.key, "content": r.content, "depth": r.depth,
+                    "neighbors": [
+                        {"key": n.key, "ambient": n.ambient, "relation": n.relation}
+                        for n in r.neighbors
+                    ],
+                }
+                for r in results
+            ]
+            conn.execute(
+                "INSERT OR REPLACE INTO state (key, value) VALUES ('pending_recall', ?)",
+                (json.dumps(data),),
+            )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def turn(
@@ -86,11 +138,12 @@ def turn(
     # Format hot context with identity — same convention as Recent section
     hot = f"{actor or 'mono'}: {message}"
 
-    # TODO: carry forward recall results from previous Claude response
+    previous_recall = _load_recall_results(config.db_path)
     package = assemble(
         wake_config,
         hot_context=hot,
         current_turn=mono_result.turn,
+        recall_results=previous_recall,
         image_path=image_path,
     )
 
@@ -130,6 +183,9 @@ def turn(
         result = recall(key, config.db_path, deep=deep)
         if result:
             recall_results.append(result)
+
+    # Save recall results for next turn's context
+    _save_recall_results(config.db_path, recall_results)
 
     # 7. Extract display content for the frontend
     display_parts = []

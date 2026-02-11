@@ -499,7 +499,8 @@
     let result = '';
     for (const seg of segments) {
       let t = seg.text;
-      if (seg.format) t = '<' + seg.format + '>' + t + '</' + seg.format + '>';
+      const fmt = seg.format || 'say';
+      t = '<' + fmt + '>' + t + '</' + fmt + '>';
       if (seg.plan) t = '<plan>' + t + '</plan>';
       if (seg.pin) t = '<pin>' + t + '</pin>';
       if (seg.identity) t = '<' + seg.identity + '>' + t + '</' + seg.identity + '>';
