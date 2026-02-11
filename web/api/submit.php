@@ -62,22 +62,9 @@ try {
     // Signal the cron worker to wake up immediately
     @touch(ss_state_dir() . '/trigger');
 
-    $debug = null;
-    $upload = $job['upload'] ?? null;
-    if (is_array($upload)) {
-        $debug = [
-            'size' => $upload['size_bytes'] ?? null,
-            'mime' => $upload['mime_type'] ?? null,
-            'path' => basename((string)($upload['host_path'] ?? '')),
-        ];
-    }
-
     ss_json_response(200, [
         'ok'     => true,
         'job_id' => $job['id'],
-        '_upload' => $debug,
-        '_log'   => ss_data_dir() . '/compress_debug.log',
-        '_v'     => 4,
     ]);
 } catch (Throwable $e) {
     ss_json_response(500, ['ok' => false, 'error' => $e->getMessage()]);
