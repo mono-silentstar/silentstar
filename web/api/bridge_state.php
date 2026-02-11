@@ -15,7 +15,9 @@ try {
         'ok'     => true,
         'online' => $online,
         'busy'   => (bool)($state['busy'] ?? false),
-        'v'      => 2,
+        'v'      => 3,
+        '_gd'    => function_exists('imagecreatefromjpeg'),
+        '_mem'   => ini_get('memory_limit'),
     ]);
 } catch (Throwable $e) {
     ss_json_response(500, ['ok' => false, 'error' => $e->getMessage()]);
