@@ -13,7 +13,13 @@ $loginError = isset($_GET['login_error']) && $_GET['login_error'] === '1';
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0e0e12">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>silentstar</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="static/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="static/icon-192.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
@@ -123,5 +129,10 @@ $loginError = isset($_GET['login_error']) && $_GET['login_error'] === '1';
 
 <?php endif; ?>
 
+<script>
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+</script>
 </body>
 </html>
