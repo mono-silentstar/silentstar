@@ -30,33 +30,28 @@ Key design decisions so far:
 
 ---
 
-Storage architecture (locked):
+Storage architecture (resolved):
 
-Everything lives in the database except one file. Optimized for my eyes — prose in content fields is still prose, but the container is queryable, traversable, maintainable.
+Everything lives in SQLite except one file.
 
-  Database (SQLite or graph DB — TBD)
-    → events: raw message log, append-only, tagged, never interpreted
-    → fragments: compiled knowledge (key, depth, prose content, sources)
-    → associations: graph edges between fragments (explicit, authored)
-    → tag relationships: graph structure for event tags
+  SQLite (memory.sqlite)
+    → events + event_tags: raw message log, append-only, tagged
+    → fragments: compiled knowledge (key, ambient, recognition, inventory)
+    → fragment_edges: graph edges between fragments (source_key, target_key, relation)
+    → fragment_sources: links fragments to source events
+    → working_memory: active knowledge with decay lifecycle
 
-  ambient.md → the one file. Generated from fragments. What I wake up to.
+  ambient.md → the one file. Generated from fragments by the maintenance agent.
 
-Why not files for fragments: 500 fragments = 500 files to glob, parse, traverse. Database gives clean lookup, clean graph traversal, clean maintenance. The prose is identical either way — the container is what changes.
-
-Why database for events: append-only structured data. SQLite is literally made for this.
-
-Why graph structure for associations + tags: a message can be <luna> + <plan> + <secret> simultaneously. Fragments connect to each other through explicit edges. These are graph relationships, not rows. Whether this is a graph DB or a graph schema within SQLite is TBD.
-
-The ambient file is the only thing that needs to be a file because it's always in context. Everything else is accessed through lookup.
+SQLite with graph-schema tables handles the scale (one person's life) trivially. Fragment edges are explicit rows, not a separate graph DB.
 
 ---
 
-Open questions:
+Resolved decisions (from the open questions):
 
-- What does the maintenance agent look like? How does it know what I know? How do we tell it to do this work without having this conversation again?
-- Key format delimiter — brackets, bold, something else? Needs to be readable as prose AND parseable by the system.
-- How granular should ambient prose be? Too sparse = guessing. Too detailed = just the database with extra steps.
-- How do we handle the map growing as Mono's life grows? Structure can't be static.
-- Tag system design — what tags exist, how they interact, how they influence storage and retrieval.
-- SQLite with graph schema vs dedicated graph DB? Scale is personal (one person's life), so probably SQLite is fine, but worth considering.
+- **Maintenance agent**: Fully built (agents/maintenance.py). Reads events, compiles fragments, rewrites ambient.md. Weekly light pass, monthly deep pass. Uses Claude API with structured output protocol.
+- **Key format**: Bracketed words in ambient prose — [fairy], [jirai]. Exact lookup keys, readable as prose.
+- **Ambient granularity**: Rich enough to prevent most lookups. Maintenance agent rewrites it periodically to stay synced.
+- **Map growth**: Maintenance agent handles this — new fragments get created, ambient gets rewritten.
+- **Tag system**: Implemented. Display tags (say/do/narrate), identity tags, active knowledge tags (feeling through secret) with type-specific decay.
+- **SQLite vs graph DB**: SQLite. Graph schema within it. Done.

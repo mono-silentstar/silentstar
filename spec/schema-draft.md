@@ -97,13 +97,15 @@ Claude reads them via recall().
 
 HOW LOOKUP WORKS
 
-  recall("fairy")
+  recall(fairy)
     1. SELECT recognition FROM fragments WHERE key = 'fairy'
     2. Follow edges → pull neighbors at ambient depth
     3. Return: fairy's recognition + neighbors' ambient
 
-  recall("fairy", deep=True)
+  recall(fairy, deep=True)
     Same but returns inventory tier.
+
+  Both quoted and unquoted key forms are accepted by the parser.
 
   plans()
     All active working_memory items, due-dated first.
@@ -146,16 +148,19 @@ ASSEMBLY ORDER (what Claude wakes up to)
   7. Current time       — human-readable timestamp
   8. Hot context        — Mono's current message, verbatim
 
-Token budget (default):
-  Wake context:     ~500 (static file)
-  Ambient:          ~1000 (static file)
-  Working memory:   1000 base, can expand into reserve
-  Conversation:     1000 base, can expand into reserve
-  Reserve:          1500 (biased 70/30 toward working memory)
+Token budget (hard caps):
+  Wake + Ambient:   ~2000 (file-loaded, informational)
+  Working memory:    1500
+  Conversation:      5000 (FIFO pool allocation):
+    - 1500 mono pool (Mono's messages)
+    - 1500 say pool (Claude's say content)
+    - 1000 do pool (Claude's do + narrate content)
+    - 1000 flex reserve (overflow from any full pool)
+  Recall:            1000
+  Total:            ~8500 + activation + hot context
 
-Pressure mechanic: as working memory fills, conversation decay
-accelerates. More active knowledge = older conversation fades
-faster. "Shut up, let me think."
+Conversation uses FIFO with pool-based allocation — no decay,
+just recency. Working memory still uses decay scoring.
 
 ---
 

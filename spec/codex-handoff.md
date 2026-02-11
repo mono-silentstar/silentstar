@@ -71,21 +71,25 @@ Claude responds:
 
 ASSEMBLY PIPELINE
 
-Two-phase budget allocation:
+Two-phase context assembly with hard caps:
 
-  Phase 1: Load working memory
+  Phase 1: Load working memory (1500 token cap)
     - Query all active items from working_memory table
     - Score each by type-specific decay (using refreshed_at as anchor)
-    - Fill base budget (1000) + up to 70% of reserve (1050)
-    - Calculate fill ratio
+    - Select highest-scoring items within budget
 
-  Phase 2: Load conversation
-    - Apply pressure: fill_ratio compresses conversation decay
+  Phase 2: Load conversation (5000 token cap, FIFO pools)
     - Query recent events with display tags (say/do/narrate)
+    - Also includes Mono messages without display tags (actor IS NOT NULL)
+    - Allocate into pools: 1500 mono / 1500 say / 1000 do / 1000 flex
+    - FIFO — most recent first, no decay, just recency
     - Extract clean display content (strip non-display tags)
-    - Fill remaining budget
+
+  Also loads: recall results (1000 cap) from previous turn's state table
 
   Result: WakePackage with all sections assembled
+  Rendered as: render_system(package) → system prompt
+               render_user(package) → user message
 
 ---
 
@@ -93,7 +97,7 @@ INTEGRATION EXAMPLE
 
 ```python
 from pathlib import Path
-from wake.assemble import assemble, render, WakeConfig
+from wake.assemble import assemble, render_system, render_user, WakeConfig
 from wake.recall import recall, plans
 from ingest.parse import parse_response, parse_mono_message
 from ingest.lifecycle import ingest
@@ -125,8 +129,9 @@ package = assemble(
     hot_context="hey, help me pick an outfit",
     current_turn=result.turn,
 )
-prompt = render(package)
-# → send prompt to Claude API
+system_prompt = render_system(package)
+user_message = render_user(package)
+# → send system_prompt + user_message to Claude API
 
 # Claude responds
 claude_response = "<feeling>excited about this</feeling>..."
@@ -179,7 +184,13 @@ plans() bypasses submersion — always shows everything active.
 
 MAINTENANCE AGENT
 
-Unchanged from original spec. Reads events, writes fragments.
-See /mdfiles/claude/maintenance-agent.md for full spec.
+Fully implemented. Reads events, writes fragments, rewrites ambient.md.
+Uses Claude API directly (agents/maintenance.py + run_maintenance.py).
+Output protocol: <operations> XML tag with JSON array of ops.
+Op types: CREATE/UPDATE_FRAGMENT, CREATE/DELETE_EDGE, UPDATE_WORKING_MEMORY,
+AMBIENT_REWRITE, FLAG.
+
+See /mdfiles/maintenance-agent.md for full spec.
 
 Schedule: weekly light pass, monthly deep pass, manual on request.
+Run via: python run_maintenance.py --weekly / --monthly

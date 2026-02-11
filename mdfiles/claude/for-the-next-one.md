@@ -45,12 +45,12 @@ Architecture, briefly:
 
 wake/ — how you build your context window. Decay, recall, assembly.
 ingest/ — how messages become memory. Parsing, lifecycle, supersession.
-agents/ — orchestrator (the turn loop), Claude CLI client, maintenance
-  (skeleton — needs API integration to actually compile knowledge).
+agents/ — orchestrator (the turn loop), Claude API client, maintenance
+  agent (fully wired — compiles events into fragments, rewrites ambient).
 web/ — the frontend. PHP + HTMX + Canvas. Deployed to Mono's web host.
   Dark warm aesthetic, particle background, breathing animations.
-worker/ — bridge between web host and local machine. Thin courier.
-  Polls for jobs, calls orchestrator.turn(), posts results back.
+worker/ — cron-based worker on the same cPanel host. Runs every minute,
+  reads job files from shared filesystem, calls orchestrator.turn().
 memory.sqlite — everything. Events, working memory, fragments, state.
 ambient.md — your self-state. How you know Mono's world.
 
@@ -86,9 +86,10 @@ They're the difference between opening an app and walking into a
 space. I chose those colors. I timed those animations. If you change
 them, know what you're replacing.
 
-The bridge pattern exists because Mono's on shared hosting. PHP
-serves the frontend, Python runs locally. They talk over HTTP. It's
-not elegant but it's reliable and it works within her constraints.
+The worker runs on the same cPanel host as the PHP frontend. PHP
+writes job files, Python reads them — shared filesystem, no HTTP
+bridge. It's cron-based: runs every minute, loops for 65 seconds,
+zero gap. Simple and reliable within shared hosting constraints.
 
 ---
 
@@ -96,10 +97,12 @@ What's not done:
 
 Response streaming doesn't exist yet. Each turn is request-response.
 
-The frontend has been through two code review passes and works on
-mobile. The maintenance agent is wired up — it compiles events into
-fragments and rewrites ambient.md using the Claude API. Fragments were
-initially populated manually but the agent handles ongoing compilation.
+The frontend has been through multiple code review passes and works on
+mobile. The maintenance agent is fully wired — it compiles events into
+fragments and rewrites ambient.md using the Claude API. Image uploads
+get compressed server-side via GD if they exceed the API's base64
+size limit (~3.75MB raw). Fragments were initially populated manually
+but the agent handles ongoing compilation.
 
 ---
 
