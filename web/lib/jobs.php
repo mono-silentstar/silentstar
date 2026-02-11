@@ -207,18 +207,23 @@ function ss_validate_upload(array $file, string $jobId): ?array
 
     // Compress if over Anthropic API 5MB limit
     $maxBytes = 5 * 1024 * 1024;
+    clearstatcache(true, $hostPath);
     if (filesize($hostPath) > $maxBytes) {
         $compressed = ss_compress_image($hostPath, $mime, $maxBytes);
         if ($compressed !== null) {
             $hostPath = $compressed['path'];
             $hostName = basename($hostPath);
             $mime = $compressed['mime'];
-        } else if (filesize($hostPath) > $maxBytes) {
-            @unlink($hostPath);
-            ss_json_response(413, ['ok' => false, 'error' => 'image_too_large']);
+        } else {
+            clearstatcache(true, $hostPath);
+            if (filesize($hostPath) > $maxBytes) {
+                @unlink($hostPath);
+                ss_json_response(413, ['ok' => false, 'error' => 'image_too_large']);
+            }
         }
     }
 
+    clearstatcache(true, $hostPath);
     return [
         'original_name' => $origName,
         'mime_type'      => $mime,
@@ -230,6 +235,9 @@ function ss_validate_upload(array $file, string $jobId): ?array
 
 function ss_compress_image(string $path, string $mime, int $maxBytes): ?array
 {
+    $log = [];
+    $log[] = 'compress_start: mime=' . $mime . ' path=' . basename($path);
+
     $gd = match ($mime) {
         'image/jpeg' => @imagecreatefromjpeg($path),
         'image/png'  => @imagecreatefrompng($path),
@@ -237,18 +245,28 @@ function ss_compress_image(string $path, string $mime, int $maxBytes): ?array
         'image/webp' => function_exists('imagecreatefromwebp') ? @imagecreatefromwebp($path) : false,
         default      => false,
     };
-    if ($gd === false) return null;
+    if ($gd === false) {
+        $log[] = 'gd_load_failed';
+        ss_write_compress_log($log);
+        return null;
+    }
 
     $w = imagesx($gd);
     $h = imagesy($gd);
+    $log[] = 'dimensions: ' . $w . 'x' . $h;
     $outPath = preg_replace('/\.[^.]+$/', '.jpg', $path);
 
     // Try JPEG at decreasing quality
     foreach ([85, 70, 50] as $q) {
         imagejpeg($gd, $outPath, $q);
-        if (filesize($outPath) <= $maxBytes) {
+        clearstatcache(true, $outPath);
+        $sz = filesize($outPath);
+        $log[] = 'quality=' . $q . ' size=' . $sz;
+        if ($sz <= $maxBytes) {
             if ($outPath !== $path) @unlink($path);
             imagedestroy($gd);
+            $log[] = 'ok: quality compression';
+            ss_write_compress_log($log);
             return ['path' => $outPath, 'mime' => 'image/jpeg'];
         }
     }
@@ -261,15 +279,29 @@ function ss_compress_image(string $path, string $mime, int $maxBytes): ?array
         imagecopyresampled($scaled, $gd, 0, 0, 0, 0, $nw, $nh, $w, $h);
         imagejpeg($scaled, $outPath, 70);
         imagedestroy($scaled);
-        if (filesize($outPath) <= $maxBytes) {
+        clearstatcache(true, $outPath);
+        $sz = filesize($outPath);
+        $log[] = 'scale=' . $scale . ' ' . $nw . 'x' . $nh . ' size=' . $sz;
+        if ($sz <= $maxBytes) {
             if ($outPath !== $path) @unlink($path);
             imagedestroy($gd);
+            $log[] = 'ok: scale compression';
+            ss_write_compress_log($log);
             return ['path' => $outPath, 'mime' => 'image/jpeg'];
         }
     }
 
     imagedestroy($gd);
+    $log[] = 'failed: all attempts exceeded maxBytes=' . $maxBytes;
+    ss_write_compress_log($log);
     return null;
+}
+
+function ss_write_compress_log(array $lines): void
+{
+    $logPath = ss_data_dir() . '/compress_debug.log';
+    $entry = '[' . date('Y-m-d H:i:s') . '] ' . implode(' | ', $lines) . "\n";
+    @file_put_contents($logPath, $entry, FILE_APPEND | LOCK_EX);
 }
 
 function ss_delete_upload(array $job): void
