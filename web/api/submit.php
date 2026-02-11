@@ -76,6 +76,8 @@ try {
         'ok'     => true,
         'job_id' => $job['id'],
         '_upload' => $debug,
+        '_log'   => ss_data_dir() . '/compress_debug.log',
+        '_v'     => 4,
     ]);
 } catch (Throwable $e) {
     ss_json_response(500, ['ok' => false, 'error' => $e->getMessage()]);

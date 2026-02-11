@@ -208,7 +208,16 @@ function ss_validate_upload(array $file, string $jobId): ?array
     // Compress if over Anthropic API 5MB limit
     $maxBytes = 5 * 1024 * 1024;
     clearstatcache(true, $hostPath);
-    if (filesize($hostPath) > $maxBytes) {
+    $actualSize = filesize($hostPath);
+    ss_write_compress_log([
+        'upload: ' . $origName,
+        'mime=' . $mime,
+        'size=' . $actualSize,
+        'max=' . $maxBytes,
+        'needs_compress=' . ($actualSize > $maxBytes ? 'YES' : 'no'),
+        'path=' . $hostPath,
+    ]);
+    if ($actualSize > $maxBytes) {
         $compressed = ss_compress_image($hostPath, $mime, $maxBytes);
         if ($compressed !== null) {
             $hostPath = $compressed['path'];
