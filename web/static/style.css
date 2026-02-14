@@ -192,6 +192,63 @@ html, body {
   box-shadow: 0 0 8px rgba(90, 138, 106, 0.4);
 }
 
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.loom-upload-btn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-faint);
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.loom-upload-btn:hover {
+  border-color: rgba(255, 255, 255, 0.08);
+  color: var(--text-muted);
+}
+
+.loom-upload-btn.uploading {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.loom-upload-btn.success {
+  border-color: var(--online);
+  color: var(--online);
+}
+
+.loom-badge {
+  display: none;
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 14px;
+  height: 14px;
+  border-radius: 7px;
+  background: var(--claude-accent);
+  color: var(--bg);
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 14px;
+  text-align: center;
+  padding: 0 3px;
+}
+
+.loom-badge.visible { display: block; }
+
+#loom-input { display: none; }
+
 .logout-btn {
   background: none;
   border: none;
@@ -741,6 +798,22 @@ time {
     width: 32px;
     height: 32px;
     font-size: 16px;
+  }
+  .loom-upload-btn {
+    width: 44px;
+    height: 44px;
+  }
+  .loom-upload-btn svg {
+    width: 18px;
+    height: 18px;
+  }
+  .loom-badge {
+    min-width: 18px;
+    height: 18px;
+    font-size: 10px;
+    line-height: 18px;
+    top: -6px;
+    right: -6px;
   }
   .actor { font-size: 12px; }
 }

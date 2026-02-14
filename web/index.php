@@ -23,7 +23,7 @@ $loginError = isset($_GET['login_error']) && $_GET['login_error'] === '1';
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="static/style.css?v=5">
+  <link rel="stylesheet" href="static/style.css?v=6">
 </head>
 <body>
 
@@ -61,9 +61,19 @@ $loginError = isset($_GET['login_error']) && $_GET['login_error'] === '1';
           <span id="bridge-label">...</span>
         </div>
       </div>
-      <form method="post" action="api/logout.php">
-        <button class="logout-btn" type="submit">leave</button>
-      </form>
+      <div class="header-right">
+        <button type="button" id="loom-upload-btn" class="loom-upload-btn" title="upload for loom">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+            <circle cx="12" cy="13" r="4"/>
+          </svg>
+          <span id="loom-badge" class="loom-badge"></span>
+        </button>
+        <input type="file" id="loom-input" accept="image/*" multiple>
+        <form method="post" action="api/logout.php">
+          <button class="logout-btn" type="submit">leave</button>
+        </form>
+      </div>
     </div>
 
     <!-- Chat -->
@@ -124,8 +134,8 @@ $loginError = isset($_GET['login_error']) && $_GET['login_error'] === '1';
   </div>
 
   <script src="https://unpkg.com/htmx.org@2.0.4" crossorigin="anonymous"></script>
-  <script src="static/space.js?v=5"></script>
-  <script src="static/chat.js?v=5"></script>
+  <script src="static/space.js?v=6"></script>
+  <script src="static/chat.js?v=6"></script>
 
 <?php endif; ?>
 

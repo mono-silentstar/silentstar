@@ -889,6 +889,73 @@
     pollIntervals.forEach(id => clearInterval(id));
   });
 
+  // --- Loom image upload ---
+
+  const loomBtn   = document.getElementById('loom-upload-btn');
+  const loomInput = document.getElementById('loom-input');
+  const loomBadge = document.getElementById('loom-badge');
+
+  if (loomBtn && loomInput && loomBadge) {
+    let loomUploading = false;
+
+    function updateLoomBadge(count) {
+      if (count > 0) {
+        loomBadge.textContent = String(count);
+        loomBadge.classList.add('visible');
+      } else {
+        loomBadge.classList.remove('visible');
+        loomBadge.textContent = '';
+      }
+    }
+
+    async function fetchLoomCount() {
+      try {
+        const resp = await fetch('api/loom_images.php', { credentials: 'same-origin' });
+        if (checkAuth(resp)) return;
+        const data = await resp.json();
+        if (data && data.ok) updateLoomBadge(data.count);
+      } catch { /* silent */ }
+    }
+
+    loomBtn.addEventListener('click', () => {
+      if (loomUploading) return;
+      loomInput.click();
+    });
+
+    loomInput.addEventListener('change', async () => {
+      const files = loomInput.files;
+      if (!files || files.length === 0) return;
+
+      loomUploading = true;
+      loomBtn.classList.add('uploading');
+
+      const fd = new FormData();
+      for (let i = 0; i < files.length; i++) {
+        fd.append('images[]', files[i]);
+      }
+
+      try {
+        const resp = await fetch('api/upload_loom.php', { method: 'POST', body: fd, credentials: 'same-origin' });
+        if (checkAuth(resp)) return;
+        const data = await resp.json();
+
+        if (data && data.ok) {
+          loomBtn.classList.add('success');
+          setTimeout(() => loomBtn.classList.remove('success'), 1500);
+          fetchLoomCount();
+        }
+      } catch { /* silent */ }
+      finally {
+        loomUploading = false;
+        loomBtn.classList.remove('uploading');
+        loomInput.value = '';
+      }
+    });
+
+    // Fetch initial count
+    fetchLoomCount();
+  }
+
   // --- Init ---
   msgInput.focus();
   if (sendBtn) sendBtn.title = 'Send (Ctrl+Enter)';
