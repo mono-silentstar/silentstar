@@ -263,6 +263,103 @@ def score(
     return max(raw, profile.floor)
 
 
+# Context assembly filters at 0.01 — items below this never appear.
+# Sweep threshold is lower: items stay active longer in the DB,
+# giving the Mirror and Lens time to see them before they're marked dead.
+CONTEXT_THRESHOLD = 0.01
+SWEEP_THRESHOLD = 0.005
+
+
+def sweep_decayed(
+    conn: "sqlite3.Connection",
+    now: datetime,
+    current_turn: int,
+    params: DecayParams | None = None,
+) -> int:
+    """Mark low-scoring active WM items as decayed. Returns count marked.
+
+    Uses SWEEP_THRESHOLD (lower than CONTEXT_THRESHOLD) so items have
+    a buffer zone where they've left context but are still active in the DB.
+    Secrets and open-ended plans are never swept.
+    """
+    import sqlite3
+
+    rows = conn.execute("""
+        SELECT id, type, content, due, turn, created_at, refreshed_at
+        FROM working_memory
+        WHERE status = 'active'
+    """).fetchall()
+
+    if not rows:
+        return 0
+
+    # Estimate turn rate for items without stored turn
+    first_row = conn.execute("SELECT MIN(ts) FROM events").fetchone()
+    turn_rate = 0.0
+    if first_row and first_row[0] and current_turn > 0:
+        first_ts = datetime.fromisoformat(first_row[0]).replace(tzinfo=timezone.utc)
+        total_seconds = max((now - first_ts).total_seconds(), 1.0)
+        turn_rate = current_turn / total_seconds
+
+    p = params or DecayParams()
+    now_iso = now.isoformat()
+    marked = 0
+
+    for row in rows:
+        wm_type = row["type"]
+
+        # Never sweep secrets
+        if wm_type == "secret":
+            continue
+
+        persistence_map = {
+            "feeling": Persistence.FEELING,
+            "thought": Persistence.THOUGHT,
+            "pattern": Persistence.PATTERN,
+            "desc": Persistence.DESC,
+            "plan": Persistence.PLAN,
+            "pin": Persistence.PIN,
+        }
+        persistence = persistence_map.get(wm_type, Persistence.THOUGHT)
+
+        ts = datetime.fromisoformat(row["created_at"]).replace(tzinfo=timezone.utc)
+        refreshed = datetime.fromisoformat(row["refreshed_at"]).replace(tzinfo=timezone.utc)
+
+        due = None
+        if row["due"]:
+            due = datetime.fromisoformat(row["due"]).replace(tzinfo=timezone.utc)
+
+        stored_turn = row["turn"]
+        if stored_turn is not None:
+            estimated_turn = stored_turn
+        elif turn_rate > 0:
+            age_seconds = max((now - ts).total_seconds(), 0.0)
+            estimated_turn = max(0, current_turn - int(age_seconds * turn_rate))
+        else:
+            estimated_turn = current_turn
+
+        frag = ContextFragment(
+            content=row["content"],
+            timestamp=ts,
+            turn_number=estimated_turn,
+            persistence=persistence,
+            refreshed_at=refreshed,
+            due=due,
+            tags=[wm_type],
+            source=f"wm:{row['id']}",
+        )
+
+        s = score(frag, now, current_turn, p)
+        if s < SWEEP_THRESHOLD:
+            conn.execute(
+                "UPDATE working_memory SET status = 'decayed', resolved_at = ? WHERE id = ?",
+                (now_iso, row["id"]),
+            )
+            marked += 1
+
+    return marked
+
+
 def select_within_budget(
     fragments: list[ContextFragment],
     now: datetime,
@@ -290,7 +387,7 @@ def select_within_budget(
     remaining = token_budget
 
     for frag, s in scored:
-        if s <= 0.01:  # below perceptual threshold
+        if s <= CONTEXT_THRESHOLD:
             continue
         if frag.token_estimate <= remaining:
             selected.append(frag)

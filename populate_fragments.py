@@ -12,7 +12,7 @@ import sqlite3
 import os
 from datetime import datetime, timezone
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "data", "memory.sqlite")
+DB_PATH = os.path.join(os.path.dirname(__file__), "data", "silentstar.sqlite")
 NOW = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 

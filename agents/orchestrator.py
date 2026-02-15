@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-from wake.assemble import assemble, render_system, render_user, WakeConfig
+from wake.assemble import assemble, render_system, render_user, snapshot_manifest, WakeConfig
 from wake.recall import recall, RecallResult, NeighborResult
 from wake.schema import connect, migrate
 from ingest.parse import (
@@ -40,6 +40,7 @@ class TurnConfig:
     wake_context_image_path: Path
     ambient_path: Path
     claude_config: ClaudeConfig = field(default_factory=ClaudeConfig)
+    context_dir: Path | None = None  # data/context/ — if None, derived from db_path
 
 
 @dataclass
@@ -152,6 +153,24 @@ def turn(
 
     system_prompt = render_system(package)
     user_message = render_user(package)
+
+    # Snapshot — record what the Heart sees this turn
+    try:
+        from wake.context_schema import save_snapshot
+        ctx_dir = config.context_dir or config.db_path.parent / "context"
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        ctx_path = ctx_dir / f"{today}.sqlite"
+        token_counts, items_included = snapshot_manifest(package)
+        save_snapshot(
+            ctx_path,
+            turn=mono_result.turn,
+            system_text=system_prompt,
+            user_text=user_message,
+            token_counts=token_counts,
+            items_included=items_included,
+        )
+    except Exception:
+        pass  # snapshot failures never break conversation
 
     # 3. Send to Claude
     img = Path(image_path) if image_path else None

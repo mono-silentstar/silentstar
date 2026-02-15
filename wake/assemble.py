@@ -48,6 +48,7 @@ from .schema import connect, DISPLAY_TAGS, ALL_TAGS, IDENTITY_TAGS
 # Budget defaults — hard caps for each section.
 # Activation and self-state are full files, always included.
 DEFAULT_WM_BUDGET = 1500           # working memory hard cap
+DEFAULT_SUMMARIES_BUDGET = 800     # compressed summaries from the Mirror
 DEFAULT_RECALL_BUDGET = 1000       # recall results from previous turn
 
 # Conversation pool budgets — FIFO allocation, most recent first.
@@ -107,7 +108,9 @@ class WakeConfig:
     wake_context_path: Path
     wake_context_image_path: Path
     ambient_path: Path
+    summaries_path: Path | None = None  # summaries.sqlite — if None, derived from db_path
     wm_budget: int = DEFAULT_WM_BUDGET
+    summaries_budget: int = DEFAULT_SUMMARIES_BUDGET
     conversation: ConversationBudget = field(default_factory=ConversationBudget)
     recall_budget: int = DEFAULT_RECALL_BUDGET
     decay_params: DecayParams = field(default_factory=DecayParams)
@@ -119,6 +122,7 @@ class WakePackage:
     activation: str                           # who I am
     image_context: str | None                 # how to handle image (conditional)
     self_state: str                           # what I know
+    summaries: list[str]                      # compressed history from the Mirror
     working_memory: list[ContextFragment]     # active knowledge
     recall_results: list[RecallResult]        # lookups from previous turn
     conversation: list[ContextFragment]       # recent messages
@@ -276,6 +280,52 @@ def _load_working_memory(
     fill_ratio = used_tokens / token_budget if token_budget > 0 else 0.0
 
     return selected, fill_ratio
+
+
+def _load_summaries(
+    summaries_path: Path,
+    token_budget: int,
+) -> list[str]:
+    """Load compressed summaries from the Mirror, most recent first, within budget.
+
+    Returns summary content strings in chronological order (oldest first).
+    """
+    if not summaries_path.exists():
+        return []
+
+    try:
+        from .summaries_schema import connect_summaries
+        sum_conn = connect_summaries(summaries_path)
+    except Exception:
+        return []
+
+    try:
+        rows = sum_conn.execute("""
+            SELECT content FROM summaries
+            WHERE level = 'L0'
+            ORDER BY chunk_end DESC
+        """).fetchall()
+
+        if not rows:
+            return []
+
+        selected = []
+        remaining = token_budget
+
+        for row in rows:
+            content = row["content"]
+            tokens = _estimate_tokens(content)
+            if tokens <= remaining:
+                selected.append(content)
+                remaining -= tokens
+            else:
+                break  # no more room
+
+        # Chronological order — oldest first
+        selected.reverse()
+        return selected
+    finally:
+        sum_conn.close()
 
 
 def _load_conversation(
@@ -478,6 +528,10 @@ def assemble(
         # 3. Self-state — what I know
         self_state = _load_file(config.ambient_path)
 
+        # 4. Compressed summaries from the Mirror
+        sum_path = config.summaries_path or config.db_path.parent / "summaries.sqlite"
+        summaries = _load_summaries(sum_path, config.summaries_budget)
+
         # Working memory — decay-scored within hard cap
         working_memory, _ = _load_working_memory(
             conn, now, current_turn, config.wm_budget, config.decay_params
@@ -498,6 +552,7 @@ def assemble(
             activation=activation,
             image_context=image_context,
             self_state=self_state,
+            summaries=summaries,
             working_memory=working_memory,
             recall_results=trimmed_recall,
             conversation=conversation,
@@ -508,6 +563,67 @@ def assemble(
 
     finally:
         conn.close()
+
+
+def snapshot_manifest(package: WakePackage) -> tuple[dict, dict]:
+    """Extract token counts and item metadata from a WakePackage.
+
+    Returns (token_counts, items_included) suitable for context snapshots.
+    """
+    # Token counts per section
+    wake_tokens = _estimate_tokens(package.activation)
+    ambient_tokens = _estimate_tokens(package.self_state)
+    summaries_tokens = sum(_estimate_tokens(s) for s in package.summaries)
+    wm_tokens = sum(f.token_estimate for f in package.working_memory)
+    recall_tokens = sum(
+        _estimate_tokens(r.content) + sum(_estimate_tokens(n.ambient) for n in r.neighbors)
+        for r in package.recall_results
+    )
+    conversation_tokens = sum(f.token_estimate for f in package.conversation)
+    hot_tokens = _estimate_tokens(package.hot_context)
+
+    if package.image_context:
+        wake_tokens += _estimate_tokens(package.image_context)
+
+    total = (wake_tokens + ambient_tokens + summaries_tokens + wm_tokens
+             + recall_tokens + conversation_tokens + hot_tokens)
+
+    token_counts = {
+        "wake": wake_tokens,
+        "ambient": ambient_tokens,
+        "summaries": summaries_tokens,
+        "wm": wm_tokens,
+        "recall": recall_tokens,
+        "conversation": conversation_tokens,
+        "hot": hot_tokens,
+        "total": total,
+    }
+
+    # Items included — what went into the window
+    wm_ids = []
+    for f in package.working_memory:
+        if f.source and f.source.startswith("wm:"):
+            try:
+                wm_ids.append(int(f.source.split(":")[1]))
+            except (ValueError, IndexError):
+                pass
+
+    conversation_event_count = 0
+    for f in package.conversation:
+        if f.source and f.source.startswith("event:"):
+            conversation_event_count += 1
+
+    recall_keys = [r.key for r in package.recall_results]
+
+    items_included = {
+        "wm_ids": wm_ids,
+        "summary_count": len(package.summaries),
+        "conversation_event_count": conversation_event_count,
+        "recall_keys": recall_keys,
+        "has_image": package.has_image,
+    }
+
+    return token_counts, items_included
 
 
 def render(package: WakePackage) -> str:
@@ -549,6 +665,10 @@ def render_user(package: WakePackage) -> str:
     # Self-state — what I know
     if package.self_state:
         sections.append(package.self_state)
+
+    # Compressed summaries — what happened before
+    if package.summaries:
+        sections.append("Remembered:\n" + "\n\n".join(package.summaries))
 
     # Working memory — what I'm holding
     if package.working_memory:

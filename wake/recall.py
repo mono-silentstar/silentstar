@@ -7,8 +7,15 @@ vocabulary and the database index.
 
 Three depths:
   ambient     — always visible, never needs lookup
-  recognition — shallow pull, the story of a thing
-  inventory   — deep pull, the full detail
+  recognition — the story + relational knowledge (Loom-enriched)
+  inventory   — full detail, every piece, the complete catalogue
+
+Default is deep (inventory). The token budget in assembly is the
+natural limiter — the Heart can go deep on 2-3 fragments per turn,
+which is enough for specific recommendations. Items live in
+inventory tiers of their parent fragments, not as separate fragments.
+This keeps the graph at concept-level (wardrobe, fairy, jirai)
+while inventory tiers hold item-level detail.
 
 Neighbor-pull: when I recall a fragment, its graph neighbors
 surface briefly at ambient depth with faster decay.
@@ -49,12 +56,16 @@ from .schema import connect as _connect
 def recall(
     key: str,
     db_path: str | Path,
-    deep: bool = False,
+    deep: bool = True,
 ) -> RecallResult | None:
     """
     Look up a fragment by exact key.
 
-    Returns recognition tier by default, inventory if deep=True.
+    Returns inventory tier by default (deep=True). The token budget
+    in assembly naturally limits how many fragments fit — going deep
+    on 2-3 fragments per turn is fine. Pass deep=False for recognition
+    only (lighter, used by tools that need many keys at once).
+
     Also pulls neighbor fragments at ambient depth.
 
     Returns None if the key doesn't exist — which means the ambient
@@ -112,7 +123,7 @@ def recall(
 def recall_multi(
     keys: list[str],
     db_path: str | Path,
-    deep: bool = False,
+    deep: bool = True,
 ) -> list[RecallResult]:
     """
     Look up multiple fragments. Deduplicates neighbors —

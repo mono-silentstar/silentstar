@@ -44,13 +44,13 @@ def main() -> int:
     )
     parser.add_argument(
         "--db", default=None,
-        help="Path to memory.sqlite (default: <project>/memory.sqlite).",
+        help="Path to silentstar.sqlite (default: data/silentstar.sqlite).",
     )
 
     args = parser.parse_args()
 
     # Resolve paths
-    db_path = Path(args.db) if args.db else ROOT / "memory.sqlite"
+    db_path = Path(args.db) if args.db else ROOT / "data" / "silentstar.sqlite"
     ambient_path = ROOT / "ambient.md"
     agent_prompt_path = ROOT / "mdfiles" / "claude" / "maintenance-agent.md"
 
