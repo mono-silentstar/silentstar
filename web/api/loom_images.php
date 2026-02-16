@@ -51,6 +51,9 @@ try {
             exit;
         }
 
+        // Clear any output leaked by included files (e.g. config.local.php)
+        while (ob_get_level()) ob_end_clean();
+
         header('Content-Type: ' . $mime);
         header('Content-Length: ' . filesize($path));
         header('Cache-Control: private, max-age=3600');
