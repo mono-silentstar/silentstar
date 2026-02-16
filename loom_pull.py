@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import io
 import json
 import os
 import sys
@@ -35,6 +36,9 @@ except ImportError:
         file=sys.stderr,
     )
     sys.exit(1)
+
+# Same limit as claude_client.py — API cap is 5MB base64, so ~3.75MB raw
+_IMAGE_MAX_BYTES = 5 * 1024 * 1024 * 3 // 4
 
 
 def _load_base_url() -> str:
@@ -69,6 +73,61 @@ def _list_images(session: requests.Session, base_url: str) -> list[dict]:
     if not data.get("ok"):
         raise RuntimeError(f"API error: {data.get('error', 'unknown')}")
     return data.get("files", [])
+
+
+def _compress_if_needed(path: Path) -> int | None:
+    """Compress image in-place if over the API size limit. Returns new size or None if unchanged."""
+    raw_size = path.stat().st_size
+    if raw_size <= _IMAGE_MAX_BYTES:
+        return None
+
+    try:
+        from PIL import Image
+    except ImportError:
+        print(f"  warn  {path.name} is {raw_size / 1024:.0f} KB (over limit) but Pillow not installed", file=sys.stderr)
+        return None
+
+    img = Image.open(path)
+    if img.mode in ("RGBA", "P"):
+        img = img.convert("RGB")
+
+    # Try JPEG at decreasing quality
+    for quality in (85, 70, 50):
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=quality)
+        if buf.tell() <= _IMAGE_MAX_BYTES:
+            compressed_path = path.with_suffix(".jpg")
+            compressed_path.write_bytes(buf.getvalue())
+            if compressed_path != path:
+                path.unlink()
+            return buf.tell()
+
+    # Scale down
+    for scale in (0.75, 0.5, 0.35):
+        scaled = img.resize(
+            (int(img.width * scale), int(img.height * scale)),
+            Image.LANCZOS,
+        )
+        buf = io.BytesIO()
+        scaled.save(buf, format="JPEG", quality=70)
+        if buf.tell() <= _IMAGE_MAX_BYTES:
+            compressed_path = path.with_suffix(".jpg")
+            compressed_path.write_bytes(buf.getvalue())
+            if compressed_path != path:
+                path.unlink()
+            return buf.tell()
+
+    # Last resort
+    buf = io.BytesIO()
+    img.resize(
+        (int(img.width * 0.25), int(img.height * 0.25)),
+        Image.LANCZOS,
+    ).save(buf, format="JPEG", quality=60)
+    compressed_path = path.with_suffix(".jpg")
+    compressed_path.write_bytes(buf.getvalue())
+    if compressed_path != path:
+        path.unlink()
+    return buf.tell()
 
 
 def _download_image(
@@ -148,6 +207,9 @@ def main():
 
         print(f"  pull  {name} ({size_kb:.0f} KB)")
         _download_image(session, base_url, name, dest_path)
+        new_size = _compress_if_needed(dest_path)
+        if new_size is not None:
+            print(f"        compressed → {new_size / 1024:.0f} KB")
         downloaded += 1
 
     print(f"\nDownloaded {downloaded} image(s) to {dest}")
