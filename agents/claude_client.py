@@ -10,7 +10,8 @@ Two transports:
 
 The interface is simple:
   send(user_message, system_prompt) → response text
-  send(user_message, system_prompt, image_path) → response text (multimodal)
+  send(user_message, image_path=...) → response text (single image)
+  send(user_message, image_paths=[...]) → response text (multiple images)
 
 Everything else (assembly, parsing, ingestion) doesn't care
 how the prompt gets to Claude and back.
@@ -26,6 +27,7 @@ import subprocess
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 
@@ -54,6 +56,7 @@ def send(
     config: ClaudeConfig | None = None,
     image_path: Path | None = None,
     system_prompt: str | None = None,
+    image_paths: list[Path] | None = None,
 ) -> ClaudeResponse:
     """
     Send a message to Claude and get a response.
@@ -64,19 +67,25 @@ def send(
     user_message: everything else — ambient, working memory, conversation,
     the current message. What I wake up inside.
 
+    image_path: single image (backward compat).
+    image_paths: multiple images. If both provided, image_paths wins.
+
     This is the one function the rest of the system calls.
     """
     c = config or ClaudeConfig()
 
+    # Normalize to list
+    images = image_paths or ([image_path] if image_path else [])
+
     try:
         if c.transport == "api":
-            return _send_api(user_message, c, image_path, system_prompt)
+            return _send_api(user_message, c, images, system_prompt)
         else:
             # CLI fallback — system prompt gets folded into the user message
             full = user_message
             if system_prompt:
                 full = system_prompt + "\n\n---\n\n" + user_message
-            return _send_cli(full, c, image_path)
+            return _send_cli(full, c, images[0] if images else None)
     except Exception as e:
         return ClaudeResponse(
             text="",
@@ -85,16 +94,75 @@ def send(
         )
 
 
+def send_streaming(
+    user_message: str,
+    config: ClaudeConfig | None = None,
+    image_path: Path | None = None,
+    system_prompt: str | None = None,
+    on_chunk: Callable[[str], None] | None = None,
+    image_paths: list[Path] | None = None,
+) -> ClaudeResponse:
+    """
+    Send a message to Claude with streaming response.
+
+    Like send(), but streams the response via SSE. Calls on_chunk(text)
+    for each text delta as it arrives. Returns the complete ClaudeResponse
+    at the end.
+
+    Falls back to non-streaming send() if streaming fails.
+    """
+    c = config or ClaudeConfig()
+
+    # Normalize to list
+    images = image_paths or ([image_path] if image_path else [])
+
+    try:
+        if c.transport != "api":
+            return send(user_message, c, system_prompt=system_prompt, image_paths=images)
+        return _send_api_streaming(user_message, c, images, system_prompt, on_chunk)
+    except Exception:
+        # Fallback to non-streaming on any error
+        return send(user_message, c, system_prompt=system_prompt, image_paths=images)
+
+
 # --- API transport (default) ---
 
 ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_API_VERSION = "2023-06-01"
 
 
+def _encode_image(image_path: Path) -> dict | None:
+    """Encode a single image for the API, compressing if needed. Returns content block or None."""
+    if not image_path.exists():
+        return None
+
+    raw_bytes = image_path.read_bytes()
+    media_type = _guess_media_type(image_path)
+
+    if len(raw_bytes) > _IMAGE_MAX_BYTES:
+        try:
+            raw_bytes, media_type = _compress_image(raw_bytes, media_type)
+        except Exception:
+            pass  # compression failed, check size below
+
+    if len(raw_bytes) > _IMAGE_MAX_BYTES:
+        return None  # too large even after compression
+
+    image_data = base64.standard_b64encode(raw_bytes).decode("utf-8")
+    return {
+        "type": "image",
+        "source": {
+            "type": "base64",
+            "media_type": media_type,
+            "data": image_data,
+        },
+    }
+
+
 def _send_api(
     user_message: str,
     config: ClaudeConfig,
-    image_path: Path | None = None,
+    image_paths: list[Path] | None = None,
     system_prompt: str | None = None,
 ) -> ClaudeResponse:
     """Send via Anthropic Messages API using raw HTTP. No third-party deps."""
@@ -104,31 +172,13 @@ def _send_api(
             "No API key. Set ANTHROPIC_API_KEY or api_key in config."
         )
 
-    # Build user content — text, optionally with image
+    # Build user content — text, optionally with images
     content: list[dict] = []
 
-    if image_path and image_path.exists():
-        raw_bytes = image_path.read_bytes()
-        media_type = _guess_media_type(image_path)
-
-        # Anthropic API limit: 5MB per image
-        if len(raw_bytes) > _IMAGE_MAX_BYTES:
-            try:
-                raw_bytes, media_type = _compress_image(raw_bytes, media_type)
-            except Exception:
-                pass  # compression failed, check size below
-
-        if len(raw_bytes) <= _IMAGE_MAX_BYTES:
-            image_data = base64.standard_b64encode(raw_bytes).decode("utf-8")
-            content.append({
-                "type": "image",
-                "source": {
-                    "type": "base64",
-                    "media_type": media_type,
-                    "data": image_data,
-                },
-            })
-        # else: image too large even after compression — skip it, send text only
+    for img_path in (image_paths or []):
+        block = _encode_image(img_path)
+        if block:
+            content.append(block)
 
     content.append({"type": "text", "text": user_message})
 
@@ -171,6 +221,99 @@ def _send_api(
             text += block.get("text", "")
 
     return ClaudeResponse(text=text, success=True)
+
+
+def _send_api_streaming(
+    user_message: str,
+    config: ClaudeConfig,
+    image_paths: list[Path] | None = None,
+    system_prompt: str | None = None,
+    on_chunk: Callable[[str], None] | None = None,
+) -> ClaudeResponse:
+    """Stream via Anthropic Messages API with SSE."""
+    api_key = config.api_key or os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise RuntimeError("No API key.")
+
+    # Build content (same as _send_api)
+    content: list[dict] = []
+
+    for img_path in (image_paths or []):
+        block = _encode_image(img_path)
+        if block:
+            content.append(block)
+
+    content.append({"type": "text", "text": user_message})
+
+    body: dict = {
+        "model": config.model,
+        "max_tokens": config.max_tokens,
+        "messages": [{"role": "user", "content": content}],
+        "stream": True,
+    }
+
+    if system_prompt:
+        body["system"] = system_prompt
+
+    data = json.dumps(body).encode("utf-8")
+
+    req = Request(
+        ANTHROPIC_API_URL,
+        data=data,
+        headers={
+            "Content-Type": "application/json",
+            "X-API-Key": api_key,
+            "anthropic-version": ANTHROPIC_API_VERSION,
+        },
+        method="POST",
+    )
+
+    full_text = ""
+
+    try:
+        with urlopen(req, timeout=config.timeout_seconds) as resp:
+            for raw_line in resp:
+                line = raw_line.decode("utf-8", errors="replace").rstrip("\n\r")
+
+                if not line.startswith("data: "):
+                    continue
+
+                payload = line[6:]  # strip "data: "
+                if payload.strip() == "[DONE]":
+                    break
+
+                try:
+                    event = json.loads(payload)
+                except json.JSONDecodeError:
+                    continue
+
+                etype = event.get("type", "")
+
+                if etype == "content_block_delta":
+                    delta = event.get("delta", {})
+                    if delta.get("type") == "text_delta":
+                        text = delta.get("text", "")
+                        if text:
+                            full_text += text
+                            if on_chunk:
+                                on_chunk(text)
+
+                elif etype == "message_stop":
+                    break
+
+                elif etype == "error":
+                    err = event.get("error", {})
+                    raise RuntimeError(
+                        f"Stream error: {err.get('type', 'unknown')}: {err.get('message', '')}"
+                    )
+
+    except HTTPError as e:
+        error_body = e.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Anthropic API error {e.code}: {error_body}")
+    except URLError as e:
+        raise RuntimeError(f"Network error: {e.reason}")
+
+    return ClaudeResponse(text=full_text, success=True)
 
 
 def _guess_media_type(path: Path) -> str:

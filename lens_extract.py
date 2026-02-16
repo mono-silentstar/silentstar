@@ -11,6 +11,8 @@ Usage:
     python lens_extract.py --all                         # all fragments
     python lens_extract.py --wm                          # working memory state
     python lens_extract.py --summaries                   # mirror summaries
+    python lens_extract.py --search "fairy"              # FTS5 search across all tables
+    python lens_extract.py --search "fairy" --type fragments  # search fragments only
     python lens_extract.py wardrobe -o temp/lens/out.md  # output to file
 """
 
@@ -298,6 +300,16 @@ def extract_summaries(db_path: Path) -> str:
         sum_conn.close()
 
 
+def _format_search_results(title: str, results: list[dict], key_field: str) -> str:
+    parts = [f"# Search: {title} ({_format_date()})"]
+    parts.append(f"\n{len(results)} matches\n")
+    for item in results:
+        label = item.get(key_field, "?")
+        snippet = item.get("snippet", "")
+        parts.append(f"- [{label}] {snippet}")
+    return "\n".join(parts)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Lens extract — query the Gem, output formatted .md"
@@ -306,6 +318,9 @@ def main():
     parser.add_argument("--all", action="store_true", help="Extract all fragments")
     parser.add_argument("--wm", action="store_true", help="Working memory state")
     parser.add_argument("--summaries", action="store_true", help="Mirror summaries")
+    parser.add_argument("--search", type=str, help="Full-text search query")
+    parser.add_argument("--type", type=str, choices=["fragments", "events", "wm"],
+                        help="Limit search to specific table (default: all)")
     parser.add_argument("--db", type=str, help="Path to database (default: from config)")
     parser.add_argument("-o", "--output", type=str, help="Output to file instead of stdout")
 
@@ -319,7 +334,32 @@ def main():
     conn = connect(db_path)
 
     try:
-        if args.all:
+        if args.search:
+            from wake.search import search_fragments, search_events, search_wm, search_all
+            if args.type == "fragments":
+                results = search_fragments(conn, args.search)
+                result = _format_search_results("Fragments", results, "key")
+            elif args.type == "events":
+                results = search_events(conn, args.search)
+                result = _format_search_results("Events", results, "id")
+            elif args.type == "wm":
+                results = search_wm(conn, args.search)
+                result = _format_search_results("Working Memory", results, "id")
+            else:
+                all_results = search_all(conn, args.search)
+                parts = [f"# Search: {args.search} ({_format_date()})"]
+                for section, key_field in [("Fragments", "key"), ("Events", "id"), ("Working Memory", "id")]:
+                    section_key = section.lower().replace(" ", "_")
+                    if section_key == "working_memory":
+                        section_key = "wm"
+                    items = all_results.get(section_key, [])
+                    parts.append(f"\n## {section} ({len(items)} matches)")
+                    for item in items:
+                        label = item.get(key_field, "?")
+                        snippet = item.get("snippet", "")
+                        parts.append(f"- [{label}] {snippet}")
+                result = "\n".join(parts)
+        elif args.all:
             result = extract_all(conn)
         elif args.wm:
             result = extract_wm(conn)

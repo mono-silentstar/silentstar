@@ -294,7 +294,7 @@ def sweep_decayed(
         return 0
 
     # Estimate turn rate for items without stored turn
-    first_row = conn.execute("SELECT MIN(ts) FROM events").fetchone()
+    first_row = conn.execute("SELECT MIN(ts) FROM ev.events").fetchone()
     turn_rate = 0.0
     if first_row and first_row[0] and current_turn > 0:
         first_ts = datetime.fromisoformat(first_row[0]).replace(tzinfo=timezone.utc)

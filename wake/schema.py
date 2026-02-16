@@ -18,20 +18,39 @@ import sqlite3
 from pathlib import Path
 
 
-SCHEMA_VERSION = 3  # bump when schema changes
+SCHEMA_VERSION = 5  # bump when schema changes
 
 
-def connect(db_path: Path) -> sqlite3.Connection:
+def connect(db_path: Path, events_path: Path | None = None) -> sqlite3.Connection:
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA foreign_keys=ON")
     conn.execute("PRAGMA busy_timeout = 5000")
+
+    # ATTACH events database as 'ev' schema so ev.events / ev.event_tags work
+    ev_path = events_path or db_path.parent / "events.sqlite"
+    if ev_path.exists():
+        conn.execute("ATTACH DATABASE ? AS ev", (str(ev_path),))
+        # Cross-DB FKs (working_memory.event_id → events, fragment_sources.event_id
+        # → events) can't resolve across schemas; leave foreign_keys OFF to avoid
+        # errors. Events are append-only — referential integrity is guaranteed by
+        # application logic. Same-DB FKs in events.sqlite enforce via its own conn.
+    else:
+        # Pre-migration: events still in main DB — FKs all resolve within main
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute("ATTACH DATABASE ? AS ev", (str(db_path),))
+
     return conn
 
 
 def migrate(db_path: Path) -> None:
     """Create or update the schema. Safe to call every startup."""
+    # Ensure events DB schema is current (if it exists)
+    from .events_schema import migrate_events
+    events_path = db_path.parent / "events.sqlite"
+    if events_path.exists():
+        migrate_events(events_path)
+
     conn = connect(db_path)
 
     try:
@@ -54,11 +73,20 @@ def migrate(db_path: Path) -> None:
         if current < 3:
             _migrate_v2_to_v3(conn)
 
+        if current < 4:
+            _migrate_v3_to_v4(conn)
+
+        # v5 is conditional — only bump when events.sqlite is populated
+        target_version = SCHEMA_VERSION
+        if current < 5:
+            if not _migrate_v4_to_v5(conn, db_path):
+                target_version = 4  # stay at v4 until migrate_data_split.py runs
+
         # Update version
         conn.execute("DELETE FROM schema_version")
         conn.execute(
             "INSERT INTO schema_version (version) VALUES (?)",
-            (SCHEMA_VERSION,),
+            (target_version,),
         )
 
         conn.commit()
@@ -211,6 +239,119 @@ def _migrate_v2_to_v3(conn: sqlite3.Connection) -> None:
     cols = {row[1] for row in conn.execute("PRAGMA table_info(working_memory)")}
     if "turn" not in cols:
         conn.execute("ALTER TABLE working_memory ADD COLUMN turn INTEGER")
+
+
+def _migrate_v3_to_v4(conn: sqlite3.Connection) -> None:
+    """Add FTS5 full-text search indexes."""
+    conn.executescript("""
+        CREATE VIRTUAL TABLE IF NOT EXISTS fragments_fts USING fts5(
+            key, ambient, recognition, inventory,
+            content='fragments', content_rowid='rowid'
+        );
+
+        CREATE VIRTUAL TABLE IF NOT EXISTS events_fts USING fts5(
+            content, actor,
+            content='events', content_rowid='id'
+        );
+
+        CREATE VIRTUAL TABLE IF NOT EXISTS working_memory_fts USING fts5(
+            content, subject, type,
+            content='working_memory', content_rowid='id'
+        );
+
+        -- Sync triggers for fragments
+        CREATE TRIGGER IF NOT EXISTS fragments_ai AFTER INSERT ON fragments BEGIN
+            INSERT INTO fragments_fts(rowid, key, ambient, recognition, inventory)
+            VALUES (new.rowid, new.key, new.ambient, new.recognition, new.inventory);
+        END;
+        CREATE TRIGGER IF NOT EXISTS fragments_ad AFTER DELETE ON fragments BEGIN
+            INSERT INTO fragments_fts(fragments_fts, rowid, key, ambient, recognition, inventory)
+            VALUES ('delete', old.rowid, old.key, old.ambient, old.recognition, old.inventory);
+        END;
+        CREATE TRIGGER IF NOT EXISTS fragments_au AFTER UPDATE ON fragments BEGIN
+            INSERT INTO fragments_fts(fragments_fts, rowid, key, ambient, recognition, inventory)
+            VALUES ('delete', old.rowid, old.key, old.ambient, old.recognition, old.inventory);
+            INSERT INTO fragments_fts(rowid, key, ambient, recognition, inventory)
+            VALUES (new.rowid, new.key, new.ambient, new.recognition, new.inventory);
+        END;
+
+        -- Sync triggers for events
+        CREATE TRIGGER IF NOT EXISTS events_ai AFTER INSERT ON events BEGIN
+            INSERT INTO events_fts(rowid, content, actor)
+            VALUES (new.id, new.content, new.actor);
+        END;
+        CREATE TRIGGER IF NOT EXISTS events_ad AFTER DELETE ON events BEGIN
+            INSERT INTO events_fts(events_fts, rowid, content, actor)
+            VALUES ('delete', old.id, old.content, old.actor);
+        END;
+        CREATE TRIGGER IF NOT EXISTS events_au AFTER UPDATE ON events BEGIN
+            INSERT INTO events_fts(events_fts, rowid, content, actor)
+            VALUES ('delete', old.id, old.content, old.actor);
+            INSERT INTO events_fts(rowid, content, actor)
+            VALUES (new.id, new.content, new.actor);
+        END;
+
+        -- Sync triggers for working_memory
+        CREATE TRIGGER IF NOT EXISTS wm_ai AFTER INSERT ON working_memory BEGIN
+            INSERT INTO working_memory_fts(rowid, content, subject, type)
+            VALUES (new.id, new.content, new.subject, new.type);
+        END;
+        CREATE TRIGGER IF NOT EXISTS wm_ad AFTER DELETE ON working_memory BEGIN
+            INSERT INTO working_memory_fts(working_memory_fts, rowid, content, subject, type)
+            VALUES ('delete', old.id, old.content, old.subject, old.type);
+        END;
+        CREATE TRIGGER IF NOT EXISTS wm_au AFTER UPDATE ON working_memory BEGIN
+            INSERT INTO working_memory_fts(working_memory_fts, rowid, content, subject, type)
+            VALUES ('delete', old.id, old.content, old.subject, old.type);
+            INSERT INTO working_memory_fts(rowid, content, subject, type)
+            VALUES (new.id, new.content, new.subject, new.type);
+        END;
+    """)
+
+    # Rebuild to index existing data
+    conn.execute("INSERT INTO fragments_fts(fragments_fts) VALUES ('rebuild')")
+    conn.execute("INSERT INTO events_fts(events_fts) VALUES ('rebuild')")
+    conn.execute("INSERT INTO working_memory_fts(working_memory_fts) VALUES ('rebuild')")
+
+
+def _migrate_v4_to_v5(conn: sqlite3.Connection, db_path: Path) -> bool:
+    """Drop events tables from main DB if events.sqlite has the data.
+
+    After migrate_data_split.py copies events into events.sqlite, the
+    main DB no longer needs events/event_tags/events_fts. This migration
+    cleans them up. If events.sqlite doesn't exist or is empty, returns
+    False — the tables stay in main until the migration script runs.
+
+    Returns True if tables were dropped, False if migration was deferred.
+    """
+    events_path = db_path.parent / "events.sqlite"
+    if not events_path.exists():
+        return False  # Not migrated yet — keep events in main
+
+    # Check events.sqlite directly (not via ev. attachment which may self-refer)
+    ev_conn = sqlite3.connect(str(events_path))
+    try:
+        count = ev_conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+    except sqlite3.OperationalError:
+        count = 0  # events table doesn't exist in events.sqlite yet
+    finally:
+        ev_conn.close()
+
+    if count == 0:
+        return False  # events.sqlite exists but empty — keep main tables
+
+    # Safe to drop — events live in events.sqlite now
+    for stmt in [
+        "DROP TRIGGER IF EXISTS events_ai",
+        "DROP TRIGGER IF EXISTS events_ad",
+        "DROP TRIGGER IF EXISTS events_au",
+        "DROP TABLE IF EXISTS events_fts",
+        "DROP TABLE IF EXISTS event_tags",
+        "DROP TABLE IF EXISTS events",
+    ]:
+        conn.execute(stmt)
+
+    return True
 
 
 # Valid types and statuses for working_memory

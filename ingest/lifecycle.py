@@ -98,7 +98,7 @@ def ingest(
     try:
         # 1. Create event
         cursor = conn.execute(
-            """INSERT INTO events (ts, content, actor, image_path)
+            """INSERT INTO ev.events (ts, content, actor, image_path)
                VALUES (?, ?, ?, ?)""",
             (now, parsed.raw, parsed.actor, image_path),
         )
@@ -108,7 +108,7 @@ def ingest(
         all_tags = {span.tag for span in parsed.spans}
         for tag in all_tags:
             conn.execute(
-                "INSERT OR IGNORE INTO event_tags (event_id, tag) VALUES (?, ?)",
+                "INSERT OR IGNORE INTO ev.event_tags (event_id, tag) VALUES (?, ?)",
                 (event_id, tag),
             )
 

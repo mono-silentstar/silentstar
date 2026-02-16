@@ -1,25 +1,15 @@
-SCHEMA — v2
+SCHEMA — v5
+
+Two databases, connected via SQLite ATTACH.
 
 ---
 
-EVENTS (raw log, append-only, never interpreted)
+DATABASE: data/silentstar.sqlite (the Gem)
 
-  events
-    id          INTEGER PRIMARY KEY
-    ts          TEXT NOT NULL (ISO timestamp)
-    content     TEXT NOT NULL (raw message, untouched)
-    actor       TEXT (identity tag — luna, hasuki, claude, etc.)
-    image_path  TEXT (path to image file, nullable)
+  Schema version: 5
 
-  event_tags
-    event_id    INTEGER REFERENCES events
-    tag         TEXT NOT NULL
-    (composite key: event_id + tag)
-
-Events are the source of truth. Raw, timestamped, tagged. The
-maintenance agent reads from here. Display tags (say, do, narrate)
-and working memory tags (feeling, plan, etc.) all stored here
-as inert data.
+  Contains fragments, edges, working memory, state.
+  Events split out to events.sqlite in v5.
 
 ---
 
@@ -27,7 +17,7 @@ WORKING MEMORY (active knowledge, has lifecycle and decay)
 
   working_memory
     id              INTEGER PRIMARY KEY
-    event_id        INTEGER REFERENCES events (source event)
+    event_id        INTEGER (references ev.events, cross-DB)
     type            TEXT NOT NULL
                     (feeling | thought | pattern | desc | plan | pin | secret)
     content         TEXT NOT NULL
@@ -36,6 +26,7 @@ WORKING MEMORY (active knowledge, has lifecycle and decay)
     status          TEXT NOT NULL DEFAULT 'active'
                     (active | resolved | dropped | decayed | superseded)
     due             TEXT (ISO timestamp, plans only, nullable)
+    turn            INTEGER (creation turn, added in v3)
     created_at      TEXT NOT NULL
     refreshed_at    TEXT NOT NULL (reset on retag — decay anchor)
     resolved_at     TEXT (when status changed from active)
@@ -64,8 +55,8 @@ Supersession rules:
   plan>done/cancel: fuzzy-matches and resolves best-matching active plan
   pin>drop: fuzzy-matches and drops best-matching active pin
 
-working_memory_refs links items to fragment keys they mention,
-enabling topic-based plan lookup: plans("body-training").
+  working_memory_fts (FTS5, content-sync + triggers)
+    content, subject, type
 
 ---
 
@@ -81,7 +72,7 @@ FRAGMENTS (compiled knowledge, three tiers)
 
   fragment_sources
     fragment_key  TEXT REFERENCES fragments
-    event_id      INTEGER REFERENCES events
+    event_id      INTEGER (references ev.events, cross-DB)
     (composite key: fragment_key + event_id)
 
   fragment_edges
@@ -90,8 +81,82 @@ FRAGMENTS (compiled knowledge, three tiers)
     relation      TEXT (describes the connection)
     (composite key: source_key + target_key)
 
-Unchanged from v1. Maintenance agent writes these. Conversational
-Claude reads them via recall().
+  fragments_fts (FTS5, content-sync + triggers)
+    key, ambient, recognition, inventory
+
+---
+
+STATE + MAINTENANCE
+
+  state
+    key         TEXT PRIMARY KEY
+    value       TEXT NOT NULL
+    updated_at  TEXT NOT NULL
+
+  maintenance_runs
+    id            INTEGER PRIMARY KEY
+    started_at    TEXT NOT NULL
+    completed_at  TEXT (null = incomplete/crashed)
+    run_type      TEXT NOT NULL (weekly | monthly | manual | bootstrap)
+
+  schema_version
+    version       INTEGER NOT NULL
+
+---
+
+DATABASE: data/events.sqlite (ATTACHed as 'ev')
+
+  Schema version: 1
+
+  Accessed via ATTACH DATABASE as 'ev' schema.
+  All queries use ev.events, ev.event_tags.
+
+  events
+    id          INTEGER PRIMARY KEY
+    ts          TEXT NOT NULL (ISO timestamp)
+    content     TEXT NOT NULL (raw message, untouched)
+    actor       TEXT (identity tag — luna, hasuki, claude, etc.)
+    image_path  TEXT (path to image file, nullable)
+
+  event_tags
+    event_id    INTEGER REFERENCES events
+    tag         TEXT NOT NULL
+    (composite key: event_id + tag)
+
+  events_fts (FTS5, standalone — no content= directive)
+    content, actor
+    Standalone because content-sync FTS5 resolves to main schema,
+    which breaks when ATTACHed. Sync triggers use DELETE instead
+    of the special 'delete' insert pattern.
+
+Events are the source of truth. Raw, timestamped, tagged. The
+Mirror reads from here. Display tags (say, do, narrate) and
+working memory tags (feeling, plan, etc.) all stored as inert data.
+
+---
+
+MIGRATION HISTORY
+
+  v1: Original — events, fragments, plans, state
+  v2: working_memory replaces plans table
+  v3: Add turn column to working_memory
+  v4: FTS5 indexes (fragments_fts, events_fts, working_memory_fts) + 9 sync triggers
+  v5: Data split — events/event_tags/events_fts dropped from Gem (moved to events.sqlite)
+
+  Run migrate_data_split.py to copy events to events.sqlite.
+  v5 migration auto-drops old tables once events.sqlite has data.
+
+---
+
+ATTACH MECHANICS
+
+  connect() in wake/schema.py:
+    1. If events.sqlite exists: ATTACH as 'ev', FK OFF (cross-DB refs)
+    2. If not: self-ATTACH main DB as 'ev', FK ON (pre-migration compat)
+
+  Cross-DB FK note: working_memory.event_id and fragment_sources.event_id
+  reference events(id) which lives in ev schema. SQLite can't enforce
+  cross-DB FKs. This is fine — events are append-only, never deleted.
 
 ---
 
@@ -117,23 +182,9 @@ HOW LOOKUP WORKS
   plans(when="next tuesday")
     Items with due dates in a time window (uses dateparser).
 
----
-
-STATE + MAINTENANCE
-
-  state
-    key         TEXT PRIMARY KEY
-    value       TEXT NOT NULL
-    updated_at  TEXT NOT NULL
-
-  maintenance_runs
-    id            INTEGER PRIMARY KEY
-    started_at    TEXT NOT NULL
-    completed_at  TEXT (null = incomplete/crashed)
-    run_type      TEXT NOT NULL (weekly | monthly | manual | bootstrap)
-
-  schema_version
-    version       INTEGER NOT NULL
+  search("fairy")
+    FTS5 full-text search across fragments, events, working_memory.
+    Returns matches ranked by BM25. See wake/search.py.
 
 ---
 
@@ -170,8 +221,9 @@ NOTES
   fragments, dozens of active working memory items. SQLite handles
   this trivially.
 
-  The maintenance agent writes fragments/edges. The live system
-  writes events and working_memory. Clean separation.
+  The Anvil writes fragments/edges (all through Mono). The live system
+  writes events and working_memory. The Mirror writes summaries to
+  summaries.sqlite. Clean separation.
 
   Timed plans submerge between creation and due date (back of head),
   then resurface ~48h before due. Open-ended plans stay active.

@@ -392,55 +392,74 @@ def process_job(cfg: CronConfig, job: dict) -> None:
         context_dir=cfg.context_dir,
     )
 
-    # Run the turn
-    result: TurnResult = turn(
-        config=turn_config,
-        message=message,
-        actor=actor,
-        tags=tags if tags else None,
-        image_path=image_path,
-    )
+    # Set up streaming
+    stream_path = cfg.state_dir / f"{job_id}.stream"
+    stream_fh = open(stream_path, "w", encoding="utf-8")
 
-    if not result.success:
-        complete_job(
-            cfg, job_id,
-            status="error",
-            error_message=result.error or "turn failed",
+    def on_chunk(text: str) -> None:
+        stream_fh.write(json.dumps({"t": text}) + "\n")
+        stream_fh.flush()
+
+    try:
+        # Run the turn
+        result: TurnResult = turn(
+            config=turn_config,
+            message=message,
+            actor=actor,
+            tags=tags if tags else None,
+            image_path=image_path,
+            on_chunk=on_chunk,
         )
-        log(f"job {job_id} failed: {result.error}")
+
+        if not result.success:
+            complete_job(
+                cfg, job_id,
+                status="error",
+                error_message=result.error or "turn failed",
+            )
+            log(f"job {job_id} failed: {result.error}")
+            delete_upload(job)
+            return
+
+        # Debug: show what Claude said
+        raw = result.response_text
+        log(f"raw response ({len(raw)} chars): {raw[:300]}{'...' if len(raw) > 300 else ''}")
+
+        # Use pre-parsed display spans from TurnResult
+        display = result.display_spans
+        reply_actor = result.actor or "claude"
+        turn_id = str(result.turn)
+
+        # Complete the job
+        updated = complete_job(
+            cfg, job_id,
+            status="done",
+            display=display,
+            actor=reply_actor,
+            reply_text=result.response_text,
+            turn_id=turn_id,
+        )
+
+        # Append to history
+        if updated:
+            append_history(cfg, updated, display, reply_actor)
+
+        # Clean up temp upload
         delete_upload(job)
-        return
 
-    # Debug: show what Claude said
-    raw = result.response_text
-    log(f"raw response ({len(raw)} chars): {raw[:300]}{'...' if len(raw) > 300 else ''}")
+        log(f"job {job_id} done (turn {result.turn}, {len(display)} display spans)")
 
-    # Use pre-parsed display spans from TurnResult
-    display = result.display_spans
-    reply_actor = result.actor or "claude"
-    turn_id = str(result.turn)
+        # Check if Mirror should fire after successful job processing
+        maybe_run_mirror(cfg)
 
-    # Complete the job
-    updated = complete_job(
-        cfg, job_id,
-        status="done",
-        display=display,
-        actor=reply_actor,
-        reply_text=result.response_text,
-        turn_id=turn_id,
-    )
-
-    # Append to history
-    if updated:
-        append_history(cfg, updated, display, reply_actor)
-
-    # Clean up temp upload
-    delete_upload(job)
-
-    log(f"job {job_id} done (turn {result.turn}, {len(display)} display spans)")
-
-    # Check if Mirror should fire after successful job processing
-    maybe_run_mirror(cfg)
+    finally:
+        # Write done marker and close stream
+        try:
+            stream_fh.write(json.dumps({"done": True}) + "\n")
+            stream_fh.flush()
+            stream_fh.close()
+        except Exception:
+            pass
 
 
 def cleanup_old_jobs(jobs_dir: Path, max_age_seconds: int = 300) -> int:
@@ -458,6 +477,16 @@ def cleanup_old_jobs(jobs_dir: Path, max_age_seconds: int = 300) -> int:
                     deleted += 1
         except Exception:
             pass
+
+    # Also clean up old stream files
+    for path in jobs_dir.parent.joinpath("state").glob("*.stream"):
+        try:
+            if now - path.stat().st_mtime > max_age_seconds:
+                path.unlink(missing_ok=True)
+                deleted += 1
+        except Exception:
+            pass
+
     return deleted
 
 

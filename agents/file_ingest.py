@@ -359,21 +359,21 @@ def _ingest_as_events(
 
     for i, chunk in enumerate(chunks):
         cursor = conn.execute(
-            "INSERT INTO events (ts, content, actor) VALUES (?, ?, ?)",
+            "INSERT INTO ev.events (ts, content, actor) VALUES (?, ?, ?)",
             (now, chunk, actor),
         )
         event_id = cursor.lastrowid
 
         # Tag with source info
         conn.execute(
-            "INSERT OR IGNORE INTO event_tags (event_id, tag) VALUES (?, ?)",
+            "INSERT OR IGNORE INTO ev.event_tags (event_id, tag) VALUES (?, ?)",
             (event_id, source_tag),
         )
 
         # Add any user-specified tags
         for tag in spec.tags:
             conn.execute(
-                "INSERT OR IGNORE INTO event_tags (event_id, tag) VALUES (?, ?)",
+                "INSERT OR IGNORE INTO ev.event_tags (event_id, tag) VALUES (?, ?)",
                 (event_id, tag),
             )
 
@@ -436,11 +436,11 @@ def _log_source_event(
 ) -> None:
     """Log a source event for traceability."""
     cursor = conn.execute(
-        "INSERT INTO events (ts, content, actor) VALUES (?, ?, ?)",
+        "INSERT INTO ev.events (ts, content, actor) VALUES (?, ?, ?)",
         (now, note, spec.actor or "system"),
     )
     event_id = cursor.lastrowid
     conn.execute(
-        "INSERT OR IGNORE INTO event_tags (event_id, tag) VALUES (?, ?)",
+        "INSERT OR IGNORE INTO ev.event_tags (event_id, tag) VALUES (?, ?)",
         (event_id, f"file:{spec.path.name}"),
     )

@@ -469,6 +469,25 @@ time {
   50%      { opacity: 0.4;  transform: scaleX(1); }
 }
 
+/* --- Streaming --- */
+
+.streaming-say {
+  display: inline;
+}
+
+.streaming-block {
+  opacity: 0;
+  transition: opacity 500ms ease-in;
+}
+
+.streaming-block.visible {
+  opacity: 0.65;
+}
+
+.streaming-block.display-narrate.visible {
+  opacity: 0.68;
+}
+
 /* --- Error --- */
 
 .error-turn {

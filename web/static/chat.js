@@ -751,6 +751,193 @@
     scrollToBottom();
   }
 
+  // --- Streaming renderer ---
+
+  // Tag parser state machine for streaming raw text from Claude
+  function createTagParser() {
+    let buffer = '';          // accumulates raw text
+    let currentTag = null;    // currently open display tag (say/do/narrate)
+    let insideIgnored = 0;    // depth of non-display tags to skip
+    let blocks = [];          // completed display blocks [{tag, content}]
+    let pendingContent = '';  // content accumulating inside current display tag
+
+    function flush() {
+      // Anything in buffer that isn't inside a tag is implicit say
+      if (buffer && !currentTag && insideIgnored === 0) {
+        pendingContent += buffer;
+        buffer = '';
+        if (!currentTag) currentTag = 'say';
+      }
+    }
+
+    function feed(text) {
+      buffer += text;
+      const newBlocks = [];
+
+      // Process tags in the buffer
+      while (true) {
+        // Look for any tag
+        const tagMatch = buffer.match(/<\/?([a-z_']+)>/);
+        if (!tagMatch) break;
+
+        const fullTag = tagMatch[0];
+        const tagName = tagMatch[1];
+        const idx = tagMatch.index;
+        const isClose = fullTag.startsWith('</');
+        const beforeTag = buffer.substring(0, idx);
+
+        const isDisplay = tagName === 'say' || tagName === 'do' || tagName === 'narrate';
+
+        if (isClose) {
+          // Closing tag
+          if (isDisplay && currentTag === tagName) {
+            pendingContent += beforeTag;
+            newBlocks.push({ tag: currentTag, content: pendingContent });
+            pendingContent = '';
+            currentTag = null;
+          } else if (!isDisplay && insideIgnored > 0) {
+            insideIgnored--;
+          } else {
+            pendingContent += beforeTag + fullTag;
+          }
+          buffer = buffer.substring(idx + fullTag.length);
+        } else {
+          // Opening tag
+          if (isDisplay) {
+            // If we had pending say content, close it
+            if (currentTag && pendingContent + beforeTag) {
+              newBlocks.push({ tag: currentTag, content: pendingContent + beforeTag });
+              pendingContent = '';
+            } else if (!currentTag && beforeTag.trim()) {
+              newBlocks.push({ tag: 'say', content: beforeTag });
+            }
+            currentTag = tagName;
+            pendingContent = '';
+          } else if (currentTag) {
+            // Non-display tag inside a display tag — pass through text before it
+            pendingContent += beforeTag;
+            insideIgnored++;
+          } else {
+            insideIgnored++;
+          }
+          buffer = buffer.substring(idx + fullTag.length);
+        }
+      }
+
+      // Text that isn't part of a tag yet
+      if (buffer && currentTag && insideIgnored === 0) {
+        // Check if buffer might contain a partial tag
+        const partialIdx = buffer.lastIndexOf('<');
+        if (partialIdx >= 0 && !buffer.substring(partialIdx).includes('>')) {
+          // Partial tag at end — emit text before it, keep partial
+          pendingContent += buffer.substring(0, partialIdx);
+          buffer = buffer.substring(partialIdx);
+        } else {
+          pendingContent += buffer;
+          buffer = '';
+        }
+      }
+
+      blocks = blocks.concat(newBlocks);
+      return newBlocks;
+    }
+
+    function finalize() {
+      // Close any remaining open tag
+      if (currentTag && (pendingContent || buffer)) {
+        blocks.push({ tag: currentTag, content: pendingContent + buffer });
+      } else if (buffer.trim()) {
+        blocks.push({ tag: 'say', content: buffer });
+      }
+      buffer = '';
+      pendingContent = '';
+      currentTag = null;
+      return blocks;
+    }
+
+    function getCurrentTag() { return currentTag; }
+    function getPending() { return pendingContent + buffer; }
+
+    return { feed, finalize, getCurrentTag, getPending };
+  }
+
+  // Artistic say renderer — words arrive in clusters with natural pauses
+  function createSayRenderer(container) {
+    let queue = [];
+    let rendering = false;
+    let wordEl = null;
+
+    function enqueue(text) {
+      // Split into word clusters (2-4 words)
+      const words = text.split(/(\s+)/);
+      let cluster = '';
+      let wordCount = 0;
+      const clusterSize = 2 + Math.floor(Math.random() * 2); // 2-3
+
+      for (const w of words) {
+        cluster += w;
+        if (w.trim()) wordCount++;
+        if (wordCount >= clusterSize) {
+          queue.push(cluster);
+          cluster = '';
+          wordCount = 0;
+        }
+      }
+      if (cluster) queue.push(cluster);
+
+      if (!rendering) drain();
+    }
+
+    function getDelay(text) {
+      const trimmed = text.trimEnd();
+      if (/\n\n/.test(trimmed)) return 400;
+      if (/[.!?]$/.test(trimmed)) return 200;
+      if (/[,;:]$/.test(trimmed)) return 80;
+      return 60;
+    }
+
+    function drain() {
+      if (queue.length === 0) { rendering = false; return; }
+      rendering = true;
+
+      const chunk = queue.shift();
+      if (!wordEl) {
+        wordEl = document.createElement('span');
+        wordEl.className = 'streaming-say';
+        container.appendChild(wordEl);
+      }
+
+      // Render with markdown (bold/italic)
+      wordEl.innerHTML += md(esc(chunk));
+      scrollToBottom();
+
+      const delay = getDelay(chunk);
+      setTimeout(drain, delay);
+    }
+
+    function finishBlock() {
+      wordEl = null;
+    }
+
+    return { enqueue, finishBlock };
+  }
+
+  // Block renderer for do/narrate — fade in as complete gesture
+  function renderBlock(container, tag, content) {
+    const p = document.createElement('p');
+    const cls = tag === 'do' ? 'display-do' : 'display-narrate';
+    p.className = cls + ' streaming-block';
+    p.innerHTML = md(esc(content));
+    container.appendChild(p);
+
+    // Trigger fade-in after brief delay
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        p.classList.add('visible');
+      });
+    });
+  }
+
   function appendPending(jobId) {
     const div = document.createElement('div');
     div.className = 'turn pending';
@@ -758,6 +945,188 @@
     chatLog.appendChild(div);
     scrollToBottom();
 
+    // Try SSE streaming first, fall back to polling
+    if (typeof EventSource !== 'undefined') {
+      appendPendingSSE(jobId, div);
+    } else {
+      appendPendingPoll(jobId, div);
+    }
+  }
+
+  function appendPendingSSE(jobId, pendingDiv) {
+    const es = new EventSource('api/stream.php?id=' + jobId);
+    const parser = createTagParser();
+    let firstChunk = true;
+    let msgDiv = null;    // the claude message container
+    let bodyDiv = null;   // the body element inside it
+    let sayRenderer = null;
+    let lastBlockTag = null;
+
+    function ensureMessageDiv() {
+      if (msgDiv) return;
+      // Remove breathing, create message structure
+      pendingDiv.classList.remove('pending');
+      pendingDiv.innerHTML = '';
+      pendingDiv.dataset.renderedJob = jobId;
+
+      msgDiv = document.createElement('div');
+      msgDiv.className = 'msg claude';
+
+      const actorSpan = document.createElement('span');
+      actorSpan.className = 'actor';
+      actorSpan.dataset.actor = 'claude';
+      actorSpan.textContent = 'claude';
+      msgDiv.appendChild(actorSpan);
+
+      bodyDiv = document.createElement('div');
+      bodyDiv.className = 'body';
+      msgDiv.appendChild(bodyDiv);
+
+      pendingDiv.appendChild(msgDiv);
+    }
+
+    function renderNewBlocks(newBlocks) {
+      for (const block of newBlocks) {
+        ensureMessageDiv();
+
+        if (lastBlockTag && lastBlockTag !== block.tag) {
+          // 300ms breath between different tag types (handled via CSS margin)
+        }
+
+        if (block.tag === 'say') {
+          if (sayRenderer) sayRenderer.finishBlock();
+          sayRenderer = createSayRenderer(bodyDiv);
+          sayRenderer.enqueue(block.content);
+        } else if (block.tag === 'do' || block.tag === 'narrate') {
+          if (sayRenderer) { sayRenderer.finishBlock(); sayRenderer = null; }
+          renderBlock(bodyDiv, block.tag, block.content);
+        }
+
+        lastBlockTag = block.tag;
+      }
+    }
+
+    es.addEventListener('chunk', function(e) {
+      try {
+        const data = JSON.parse(e.data);
+        if (!data.t) return;
+
+        if (firstChunk) {
+          firstChunk = false;
+          // Breathing stops, text begins
+        }
+
+        const newBlocks = parser.feed(data.t);
+        if (newBlocks.length > 0) {
+          renderNewBlocks(newBlocks);
+        } else if (parser.getCurrentTag() === 'say') {
+          // Still accumulating say content — stream it live
+          ensureMessageDiv();
+          if (!sayRenderer) {
+            sayRenderer = createSayRenderer(bodyDiv);
+          }
+          if (data.t && !data.t.startsWith('<')) {
+            sayRenderer.enqueue(data.t);
+          }
+        }
+      } catch { /* ignore parse errors in stream */ }
+    });
+
+    es.addEventListener('done', function() {
+      es.close();
+
+      // Finalize any remaining content
+      const allBlocks = parser.finalize();
+      if (allBlocks.length > 0) {
+        // Re-render complete message to ensure correctness
+        ensureMessageDiv();
+        bodyDiv.innerHTML = '';
+        sayRenderer = null;
+
+        for (const block of allBlocks) {
+          if (block.tag === 'say') {
+            const p = document.createElement('p');
+            p.className = 'display-say';
+            p.innerHTML = md(esc(block.content));
+            bodyDiv.appendChild(p);
+          } else if (block.tag === 'do' || block.tag === 'narrate') {
+            const p = document.createElement('p');
+            p.className = block.tag === 'do' ? 'display-do' : 'display-narrate';
+            p.innerHTML = md(esc(block.content));
+            bodyDiv.appendChild(p);
+          }
+        }
+
+        // Add timestamp
+        const meta = document.createElement('div');
+        meta.className = 'msg-meta';
+        const isoTs = new Date().toISOString();
+        meta.innerHTML = '<time class="msg-time" data-ts="' + isoTs + '" datetime="' + isoTs + '"></time>';
+        msgDiv.appendChild(meta);
+        formatMsgTimes(pendingDiv);
+      }
+
+      // If nothing was rendered (secret/invisible response)
+      if (!msgDiv) {
+        pendingDiv.remove();
+      }
+
+      scrollToBottom();
+    });
+
+    es.addEventListener('fallback', function(e) {
+      es.close();
+      // Stream not available — fall back to polling
+      try {
+        const data = JSON.parse(e.data);
+        if (data.status === 'done') {
+          // Job already done, fetch via status endpoint
+          fetchCompletedJob(jobId, pendingDiv);
+          return;
+        }
+      } catch { /* ignore */ }
+      appendPendingPoll(jobId, pendingDiv);
+    });
+
+    es.addEventListener('timeout', function() {
+      es.close();
+      appendPendingPoll(jobId, pendingDiv);
+    });
+
+    es.addEventListener('error', function() {
+      // EventSource will auto-reconnect on transient errors.
+      // If it fails definitively (readyState === CLOSED), fall back.
+      if (es.readyState === EventSource.CLOSED) {
+        es.close();
+        appendPendingPoll(jobId, pendingDiv);
+      }
+    });
+  }
+
+  function fetchCompletedJob(jobId, pendingDiv) {
+    fetch('api/status.php?id=' + jobId + '&format=json', { credentials: 'same-origin' })
+      .then(function(resp) {
+        if (checkAuth(resp)) return null;
+        return resp.json();
+      })
+      .then(function(data) {
+        if (!data) return;
+        pendingDiv.remove();
+        if (data.status === 'done' && Array.isArray(data.display) && data.display.length > 0) {
+          if (!chatLog.querySelector('[data-rendered-job="' + jobId + '"]')) {
+            appendClaudeMessage(data.display, data.actor || 'claude', jobId);
+          }
+        } else if (data.status === 'error') {
+          showError(data.error || 'something went wrong');
+        }
+      })
+      .catch(function() {
+        pendingDiv.remove();
+        showError('connection failed');
+      });
+  }
+
+  function appendPendingPoll(jobId, div) {
     let pollErrors = 0;
     const poll = setInterval(async () => {
       try {
@@ -849,7 +1218,7 @@
   function esc(str) {
     const d = document.createElement('div');
     d.textContent = str;
-    return d.innerHTML;
+    return d.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
   function md(html) {

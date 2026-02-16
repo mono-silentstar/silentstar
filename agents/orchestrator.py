@@ -19,6 +19,7 @@ import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable
 
 from wake.assemble import assemble, render_system, render_user, snapshot_manifest, WakeConfig
 from wake.recall import recall, RecallResult, NeighborResult
@@ -29,7 +30,7 @@ from ingest.parse import (
     parse_recall_requests,
 )
 from ingest.lifecycle import ingest
-from .claude_client import send, ClaudeConfig, ClaudeResponse
+from .claude_client import send, send_streaming, ClaudeConfig, ClaudeResponse
 
 
 @dataclass
@@ -114,6 +115,7 @@ def turn(
     actor: str | None = None,
     tags: list[str] | None = None,
     image_path: str | None = None,
+    on_chunk: Callable[[str], None] | None = None,
 ) -> TurnResult:
     """
     Run a single conversation turn.
@@ -174,10 +176,17 @@ def turn(
 
     # 3. Send to Claude
     img = Path(image_path) if image_path else None
-    claude_response = send(
-        user_message, config.claude_config, img,
-        system_prompt=system_prompt,
-    )
+    if on_chunk:
+        claude_response = send_streaming(
+            user_message, config.claude_config, img,
+            system_prompt=system_prompt,
+            on_chunk=on_chunk,
+        )
+    else:
+        claude_response = send(
+            user_message, config.claude_config, img,
+            system_prompt=system_prompt,
+        )
 
     if not claude_response.success:
         return TurnResult(

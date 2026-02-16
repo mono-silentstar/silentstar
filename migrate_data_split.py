@@ -1,135 +1,140 @@
 #!/usr/bin/env python3
 """
-One-time migration: memory.sqlite → data/silentstar.sqlite
+migrate_data_split.py — split events from silentstar.sqlite into events.sqlite.
 
-This script:
-  1. Creates data/ and data/context/ directories
-  2. Copies memory.sqlite → data/silentstar.sqlite (copy, not move — safe)
-  3. Moves summaries.sqlite → data/summaries.sqlite (if exists)
-  4. Verifies table counts match
-  5. Prints server migration instructions
+Usage:
+    python migrate_data_split.py [--db data/silentstar.sqlite]
 
-The old memory.sqlite stays in place until you manually delete it.
-Run from repo root: python migrate_data_split.py
+Steps:
+    1. Back up silentstar.sqlite
+    2. Create events.sqlite via migrate_events()
+    3. Copy events + event_tags rows
+    4. Rebuild events_fts index
+    5. Drop events tables from silentstar.sqlite
+    6. Print row counts for verification
 """
 
 from __future__ import annotations
 
+import argparse
+import json
 import shutil
 import sqlite3
 import sys
+from datetime import datetime
 from pathlib import Path
 
-
-REPO_ROOT = Path(__file__).resolve().parent
-
-OLD_DB = REPO_ROOT / "memory.sqlite"
-NEW_DB = REPO_ROOT / "data" / "silentstar.sqlite"
-OLD_SUMMARIES = REPO_ROOT / "summaries.sqlite"
-NEW_SUMMARIES = REPO_ROOT / "data" / "summaries.sqlite"
-CONTEXT_DIR = REPO_ROOT / "data" / "context"
+from wake.events_schema import migrate_events, connect_events
 
 
-def count_tables(db_path: Path) -> dict[str, int]:
-    """Count rows in all tables."""
-    conn = sqlite3.connect(str(db_path))
-    try:
-        tables = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name != 'sqlite_sequence'"
-        ).fetchall()
-        counts = {}
-        for (name,) in tables:
-            try:
-                row = conn.execute(f"SELECT COUNT(*) FROM [{name}]").fetchone()
-                counts[name] = row[0]
-            except sqlite3.OperationalError:
-                counts[name] = -1
-        return counts
-    finally:
-        conn.close()
+def main():
+    parser = argparse.ArgumentParser(description="Split events into events.sqlite")
+    parser.add_argument("--db", type=str, help="Path to silentstar.sqlite")
+    args = parser.parse_args()
 
-
-def main() -> int:
-    print("silentstar data split migration")
-    print("=" * 40)
-
-    # Check source exists
-    if not OLD_DB.exists():
-        print(f"\nERROR: Source database not found: {OLD_DB}")
-        print("Nothing to migrate.")
-        return 1
-
-    # Check destination doesn't already exist
-    if NEW_DB.exists():
-        print(f"\nWARNING: {NEW_DB} already exists.")
-        print("If you want to re-run, delete it first.")
-        return 1
-
-    # 1. Create directories
-    print(f"\n1. Creating directories...")
-    NEW_DB.parent.mkdir(parents=True, exist_ok=True)
-    CONTEXT_DIR.mkdir(parents=True, exist_ok=True)
-    print(f"   Created: data/")
-    print(f"   Created: data/context/")
-
-    # 2. Copy memory.sqlite → data/silentstar.sqlite
-    print(f"\n2. Copying {OLD_DB.name} → data/silentstar.sqlite ...")
-    shutil.copy2(str(OLD_DB), str(NEW_DB))
-    print(f"   Copied ({NEW_DB.stat().st_size:,} bytes)")
-
-    # 3. Move summaries.sqlite if it exists
-    if OLD_SUMMARIES.exists():
-        if NEW_SUMMARIES.exists():
-            print(f"\n3. WARNING: {NEW_SUMMARIES} already exists, skipping summaries move.")
+    # Resolve DB path
+    if args.db:
+        db_path = Path(args.db)
+    else:
+        config_path = Path("worker/config.json")
+        if config_path.exists():
+            with open(config_path) as f:
+                cfg = json.load(f)
+            db_path = Path(cfg.get("db_path", "data/silentstar.sqlite"))
         else:
-            print(f"\n3. Moving summaries.sqlite → data/summaries.sqlite ...")
-            shutil.move(str(OLD_SUMMARIES), str(NEW_SUMMARIES))
-            print(f"   Moved.")
-    else:
-        print(f"\n3. No summaries.sqlite found (that's fine — Mirror hasn't run yet).")
+            db_path = Path("data/silentstar.sqlite")
 
-    # 4. Verify
-    print(f"\n4. Verifying table counts...")
-    old_counts = count_tables(OLD_DB)
-    new_counts = count_tables(NEW_DB)
+    if not db_path.exists():
+        print(f"Database not found: {db_path}", file=sys.stderr)
+        sys.exit(1)
 
-    all_match = True
-    for table in sorted(set(old_counts) | set(new_counts)):
-        old_n = old_counts.get(table, "MISSING")
-        new_n = new_counts.get(table, "MISSING")
-        match = "OK" if old_n == new_n else "MISMATCH"
-        if old_n != new_n:
-            all_match = False
-        print(f"   {table}: {old_n} → {new_n}  [{match}]")
+    events_path = db_path.parent / "events.sqlite"
 
-    if all_match:
-        print("\n   All tables match.")
-    else:
-        print("\n   WARNING: Some tables don't match! Check before deleting old DB.")
+    # 1. Back up
+    backup_name = db_path.with_suffix(
+        f".sqlite.bak-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    )
+    print(f"Backing up {db_path} → {backup_name}")
+    shutil.copy2(db_path, backup_name)
 
-    # 5. Server instructions
-    print(f"""
-5. Server migration (manual step after deploy):
-   ─────────────────────────────────────────────
-   On the cPanel host, run:
+    # 2. Create events.sqlite schema
+    print(f"Creating {events_path}...")
+    migrate_events(events_path)
 
-     mkdir -p /home/monomeuk/silentstar/data/context
-     cp /home/monomeuk/silentstar/memory.sqlite /home/monomeuk/silentstar/data/silentstar.sqlite
+    # 3. Copy data via ATTACH
+    print("Copying events + event_tags...")
+    ev_conn = connect_events(events_path)
+    try:
+        ev_conn.execute("ATTACH DATABASE ? AS gem", (str(db_path),))
 
-   Then update config.server.json (already updated in this commit):
-     "db_path": "/home/monomeuk/silentstar/data/silentstar.sqlite"
+        # Check source has data
+        src_events = ev_conn.execute(
+            "SELECT COUNT(*) FROM gem.events"
+        ).fetchone()[0]
+        src_tags = ev_conn.execute(
+            "SELECT COUNT(*) FROM gem.event_tags"
+        ).fetchone()[0]
 
-   After verifying the new path works, you can remove:
-     rm /home/monomeuk/silentstar/memory.sqlite
+        if src_events == 0:
+            print("No events to copy.")
+            return
 
-   The old memory.sqlite in the repo root is still here — safe to delete
-   once you've confirmed everything works:
-     rm {OLD_DB}
-""")
+        # Copy events (preserve IDs)
+        ev_conn.execute("""
+            INSERT OR IGNORE INTO events (id, ts, content, actor, image_path)
+            SELECT id, ts, content, actor, image_path FROM gem.events
+        """)
 
-    print("Done.")
-    return 0
+        # Copy event_tags
+        ev_conn.execute("""
+            INSERT OR IGNORE INTO event_tags (event_id, tag)
+            SELECT event_id, tag FROM gem.event_tags
+        """)
+
+        ev_conn.commit()
+
+        # 4. FTS populated by triggers on INSERT — optimize the index
+        print("Optimizing events_fts index...")
+        ev_conn.execute("INSERT INTO events_fts(events_fts) VALUES ('optimize')")
+        ev_conn.commit()
+
+        # Verify
+        ev_events = ev_conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+        ev_tags = ev_conn.execute("SELECT COUNT(*) FROM event_tags").fetchone()[0]
+
+        print(f"  source:        {src_events} events, {src_tags} event_tags")
+        print(f"  events.sqlite: {ev_events} events, {ev_tags} event_tags")
+
+        ev_conn.execute("DETACH DATABASE gem")
+    finally:
+        ev_conn.close()
+
+    # 5. Drop old tables from silentstar.sqlite
+    print("Dropping events tables from silentstar.sqlite...")
+    gem_conn = sqlite3.connect(str(db_path))
+    try:
+        gem_conn.executescript("""
+            DROP TRIGGER IF EXISTS events_ai;
+            DROP TRIGGER IF EXISTS events_ad;
+            DROP TRIGGER IF EXISTS events_au;
+            DROP TABLE IF EXISTS events_fts;
+            DROP TABLE IF EXISTS event_tags;
+            DROP TABLE IF EXISTS events;
+        """)
+
+        # Bump schema version to 5 so migrate() knows tables are gone
+        gem_conn.execute("DELETE FROM schema_version")
+        gem_conn.execute("INSERT INTO schema_version (version) VALUES (5)")
+        gem_conn.commit()
+        print("Schema version bumped to 5.")
+    finally:
+        gem_conn.close()
+
+    print(f"\nDone! Verify with:")
+    print(f"  python -c \"from wake.schema import connect; from pathlib import Path; "
+          f"c = connect(Path('{db_path}')); "
+          f"print(c.execute('SELECT count(*) FROM ev.events').fetchone()[0])\"")
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    main()

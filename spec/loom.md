@@ -1,8 +1,8 @@
 # The Loom — Facet Agents
 
-The Loom is a set of three specialist agents the crystallizing Anvil can call for second opinions and enrichment. They're tools, not a protocol — the Anvil decides when to call them, which ones, and how to use their output.
+The Loom is a set of four facet agents that provide multiple perspectives on any given work. They're tools, not a protocol — the Anvil decides when to call them, which ones, and how to use their output. Each facet sees the same material from a different angle.
 
-## The Three Agents
+## The Four Agents
 
 ### The Cataloguer (spatial, inventory)
 
@@ -22,6 +22,14 @@ Brings in knowledge from outside the data. Material care, technical specs, best 
 
 **Prompt file:** `mdfiles/claude/loom-researcher.md`
 
+### The Questioner (uncertainty, assumptions, unexplored angles)
+
+Resists convergence. Where the other three agents add information, the Questioner expands the question space. It enumerates uncertainties, surfaces assumptions that were made without examination, and maps alternative directions that weren't explored. Call it on anything before committing — drafts, plans, designs, code.
+
+Not adversarial. Not a devil's advocate arguing the opposite. It maps the terrain of what hasn't been considered yet, so Mono and the Anvil can decide which doors to open rather than having them closed by default.
+
+**Prompt file:** `mdfiles/claude/loom-questioner.md`
+
 ## How the Anvil Uses Them
 
 The crystallizing Anvil does the primary work with Mono — looking at photos, drafting fragments, organizing inventory. The facet agents are second opinions. The Anvil should be **biased toward calling them** rather than skipping them, because they catch things the Anvil misses.
@@ -32,19 +40,34 @@ Typical patterns:
 - **After writing recognition tiers** → call Weaver to find connections you missed
 - **When cataloguing unfamiliar items** → call Researcher for specs and best practices
 - **When a session has images** → call Cataloguer to cross-check what you see
+- **Before committing anything significant** → call Questioner to surface what you haven't considered
+- **On Compass readings** → call Questioner + Weaver to check proposals against patterns and blind spots
+- **On code/design reviews** → call Questioner to enumerate assumptions and unexplored alternatives
 
-Not every session needs all three. Not every session needs any. The Anvil uses judgment.
+Not every session needs all four. Not every session needs any. The Anvil uses judgment.
 
-### Calling a facet agent
+### Running the Loom
 
-Spawn via the Task tool with:
-- The agent's prompt file as context
-- A Lens extract of relevant fragments (from `lens_extract.py`)
-- The Anvil's current draft — what you want checked/enriched
-- Any relevant images
-- A specific ask: "check this inventory against these photos" or "what connections am I missing?"
+**Primary path: Claude Code orchestrator** (recommended)
 
-The agent writes its output to `temp/<session>/` alongside the Anvil's working files. The Anvil reads the output, incorporates what's useful, discards what isn't.
+Run the Loom agent directly:
+```bash
+claude --agent loom
+```
+
+Or spawn it from an Anvil session via Task tool. The Loom orchestrator (`.claude/agents/loom.md`) handles everything: reads the draft, gathers Gem context, spawns facets in parallel as Claude Code subagents, collects results. Each facet has full tool access — the Researcher can do real web searches, the Questioner can look things up.
+
+**Legacy path: API runner** (still available)
+
+`run_loom.py` calls the Claude API directly — simpler but no tool access:
+```bash
+python3 run_loom.py temp/wardrobe/inventory.md
+python3 run_loom.py temp/wardrobe/inventory.md --agents questioner,weaver
+```
+
+### Facet output
+
+Each facet writes `{facet}-notes.md` to `temp/<session>/` alongside the Anvil's working files. The Anvil reads the output, incorporates what's useful, discards what isn't.
 
 ## Sessions
 
@@ -62,7 +85,8 @@ temp/room-inventory/
 │   │   └── storage/
 │   └── cleanup/          # progress photos
 ├── cataloguer-notes.md   # facet agent output (optional)
-└── researcher-notes.md   # facet agent output (optional)
+├── researcher-notes.md   # facet agent output (optional)
+└── questioner-notes.md   # facet agent output (optional)
 ```
 
 Sessions are iterative. The Anvil might:
@@ -111,6 +135,9 @@ When the Anvil is ready to commit (Mono has reviewed, work is done):
 - `mdfiles/claude/loom-cataloguer.md` — Cataloguer prompt (DONE)
 - `mdfiles/claude/loom-weaver.md` — Weaver prompt (DONE)
 - `mdfiles/claude/loom-researcher.md` — Researcher prompt (DONE)
+- `mdfiles/claude/loom-questioner.md` — Questioner prompt (DONE)
+- `.claude/agents/loom.md` — Loom orchestrator agent (DONE)
+- `run_loom.py` — Legacy API runner (DONE, kept as fallback)
 
 ## Open Questions
 

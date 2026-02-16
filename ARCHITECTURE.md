@@ -1,10 +1,10 @@
 # Silentstar — Architecture Reference
 
-Last updated: Feb 12, 2026
+Last updated: Feb 15, 2026
 
 This is the single source of truth for how silentstar works, what's built, and what's planned. Read this when starting a new session after compression or a fresh start.
 
-The authoritative design document for planned changes is `temp/12-2-26/compression-design.md`. This file describes the current state of the system with planned direction clearly marked.
+The original design document is `temp/12-2-26/compression-design.md` — most of what it describes is now implemented. This file describes the current state of the system.
 
 ---
 
@@ -26,25 +26,26 @@ The system is described through seven artifacts — a folklore set, not a techni
 - *Creates*: feeling (constrained — departures only, 15-word cap), thought, desc (ephemeral, images only)
 - *Does NOT create*: pin (Mirror), plan (Compass), pattern (Loom), secret (dissolved — use thought + Mirror + Compass)
 
-**The Gem** — `memory.sqlite` (migrating to `data/silentstar.sqlite`). The artifact that holds all knowledge and refracts it differently depending on how you look. Raw material goes in dirty, comes out faceted. Precious, compressed, crystallized. Everyone contributes to it; no one owns it except Mono.
+**The Gem** — `data/silentstar.sqlite`. The artifact that holds all knowledge and refracts it differently depending on how you look. Raw material goes in dirty, comes out faceted. Precious, compressed, crystallized. Everyone contributes to it; no one owns it except Mono.
 - *Relationship to Mono*: **artifact** (no agency). The thing you protect.
 - *Contains*: fragments, edges, working memory — compiled knowledge that survives everything
+- *Events split out*: `data/events.sqlite` holds the permanent event log (accessed via ATTACH as `ev` schema)
 
 **The Mirror** — the compression agent. The artifact that reflects. It takes the past and shows it back clearly — faithful reflections of conversations that already happened, rendered as summaries. It doesn't interpret, doesn't compile, doesn't decide. It reflects. Automated, frequent. Replaces the old maintenance agent (`agents/maintenance.py`), which was the pre-API-era version of this role.
 - *Relationship to Mono*: **infrastructure**. No direct relationship. Works in silence.
 - *Creates*: chunk summaries (hybrid format), tag suggestions including pin (staged in summaries.sqlite)
-- *Status*: **designed, experiments complete, not yet implemented**
+- *Status*: **implemented** (Feb 15) — `agents/mirror.py`, wired in `worker_cron.py`. Fires after every successful job.
 
-**The Loom** — the facet agents. The artifact you sit at and work the threads. Three specialist agents — the Cataloguer (spatial, inventory), the Weaver (relational, behavioral), and the Researcher (external knowledge, fact-checking) — available as tools for the crystallizing Anvil. The Anvil calls them for second opinions and enrichment; they don't run independently. A loom doesn't weave by itself.
+**The Loom** — the facet agents. The artifact you sit at and work the threads. Four facet agents — the Cataloguer (spatial, inventory), the Weaver (relational, behavioral), the Researcher (external knowledge, fact-checking), and the Questioner (uncertainty, assumptions, unexplored angles) — available as tools for the crystallizing Anvil. The Anvil calls them for second opinions and enrichment; they don't run independently. A loom doesn't weave by itself.
 - *Relationship to Mono*: **tool**. Called by the crystallizing Anvil, not used directly.
-- *Creates*: enrichment notes, second-opinion drafts, research findings — all incorporated by the Anvil with judgment
-- *Implementation*: Anvil spawns agents via Task tool when it needs them. Not every session uses all three.
-- *Status*: **designed (Feb 15)** — see `spec/loom.md`
+- *Creates*: enrichment notes, second-opinion drafts, research findings, uncertainty maps — all incorporated by the Anvil with judgment
+- *Implementation*: Claude Code orchestrator agent (`.claude/agents/loom.md`) spawns facets as parallel subagents with full tool access. Legacy API runner at `run_loom.py`.
+- *Status*: **designed + implemented (Feb 15)** — see `spec/loom.md`.
 
 **The Compass** — the planning agent. The artifact whose needle moves on its own. It responds to forces you can't perceive directly. You don't tell it where to point — you consult it, and it surprises you. It researches independently (training programs, job strategies, schedules), calculates, and proposes campaigns you didn't ask for.
 - *Relationship to Mono*: **advisory**. Autonomous, orienting, sometimes unsettling.
-- *Creates*: plans (written to Gem → Heart surfaces via submersion curve)
-- *Status*: **conceptual, not yet designed**
+- *Creates*: compass readings — observations, proposals, gap analysis. Output to temp files; plans enter WM only through Anvil/Mono review.
+- *Status*: **designed (Feb 15)** — see `spec/compass.md`. Agent at `.claude/agents/compass.md`.
 
 **The Lens** — the read tool. The artifact that focuses. Not an agent — an optic. It doesn't create light; it bends what's already there so you can see it clearly. A Python tool (`lens_extract.py`) for querying the Gem: extract fragments, follow edges, find intersections, format .md output. Mono uses it to see their own stuff. The Anvil uses it for context before writing. Any Claude instance can be given its output.
 - *Relationship to Mono*: **tool**. You look through it.
@@ -102,19 +103,24 @@ DELIBERATE (all through Mono):
 ```
 silentstar/
 ├── agents/
-│   ├── orchestrator.py     # Main conversation loop: turn()
-│   ├── claude_client.py    # Claude API transport (HTTP + CLI fallback)
+│   ├── orchestrator.py     # Main conversation loop: turn() with streaming support
+│   ├── claude_client.py    # Claude API transport (HTTP + CLI fallback, SSE streaming)
 │   ├── runner.py           # Base agent interface + deferred writes
 │   ├── file_ingest.py      # File → fragment/event ingestion
-│   └── maintenance.py      # Event → fragment compilation agent
+│   ├── mirror.py           # Mirror compression agent (multi-pass pipeline)
+│   └── maintenance.py      # Event → fragment compilation agent (legacy, pre-Mirror)
 ├── ingest/
 │   ├── parse.py            # Tag extraction from messages
 │   └── lifecycle.py        # Working memory state management + supersession
 ├── wake/
-│   ├── schema.py           # SQLite schema v2→v3 + migrations
+│   ├── schema.py           # SQLite schema v5 + migrations, ATTACH events.sqlite
+│   ├── events_schema.py    # Events DB schema (standalone FTS5, sync triggers)
+│   ├── summaries_schema.py # Summaries DB schema (Mirror output)
+│   ├── context_schema.py   # Context snapshot schema (daily debug snapshots)
 │   ├── assemble.py         # Context window assembly (FIFO pools + decay)
 │   ├── decay.py            # Memory decay scoring (exponential half-life)
-│   └── recall.py           # Fragment lookup + plans()
+│   ├── recall.py           # Fragment lookup + plans()
+│   └── search.py           # FTS5 full-text search across all tables
 ├── web/                    # PHP frontend (deployed to web host)
 │   ├── index.php           # Main shell (auth, HTMX, canvas)
 │   ├── config.php          # Config defaults (overridden by config.local.php)
@@ -123,32 +129,43 @@ silentstar/
 │   ├── api/
 │   │   ├── submit.php      # Message submission → job creation
 │   │   ├── status.php      # Job status polling (HTMX + JSON)
+│   │   ├── stream.php      # SSE streaming endpoint (real-time response)
 │   │   ├── history.php     # Conversation history (HTMX pagination)
 │   │   ├── login.php       # Auth
 │   │   ├── logout.php      # Session destroy
-│   │   └── bridge_state.php # Bridge online/busy status
+│   │   ├── bridge_state.php # Bridge online/busy status
+│   │   ├── upload_loom.php # Loom image upload from phone
+│   │   └── loom_images.php # Loom image list/serve/clear
 │   ├── lib/
 │   │   ├── bootstrap.php   # Init, paths, JSON I/O, locking
 │   │   ├── auth.php        # Session + password auth
 │   │   ├── jobs.php        # Job CRUD, bridge state, image validation
 │   │   └── history.php     # History I/O, rendering, segment parsing
 │   └── static/
-│       ├── chat.js         # Contenteditable input, submission, polling
+│       ├── chat.js         # Input, submission, SSE streaming + polling fallback
 │       ├── space.js        # Canvas background (particles, gradient, noise)
-│       ├── style.css       # Dark warm aesthetic, identity colors
+│       ├── style.css       # Dark warm aesthetic, identity colors, streaming styles
 │       ├── icon.svg         # Silent star logo (lavender #8b8ec8)
 │       ├── icon-192.png
 │       ├── icon-512.png
 │       └── generate-icons.html  # SVG→PNG offline generator
 ├── worker/
-│   ├── worker_cron.py      # Cron job: 65s loop, claim→turn()→complete
+│   ├── worker_cron.py      # Cron job: 65s loop, claim→turn()→complete + Mirror
 │   └── config.json         # Worker config (paths, API key)
+├── data/                   # All persistent storage (gitignored)
+│   ├── silentstar.sqlite   # The Gem — fragments, edges, working_memory
+│   ├── events.sqlite       # Permanent event log (append-only, ATTACHed as ev)
+│   ├── summaries.sqlite    # Mirror output — chunk summaries, tag suggestions
+│   └── context/            # Daily context window snapshots
 ├── mdfiles/
 │   ├── wake-context.md     # Legacy condensed version (NOT active)
 │   └── claude/             # Context + reference files
 │       ├── wake-context.md     # ** LOADED: system prompt (activation) **
 │       ├── wake-context-image.md # ** LOADED: image context (conditional) **
 │       ├── maintenance-agent.md # ** LOADED: maintenance agent system prompt **
+│       ├── mirror-cleanup.md    # ** LOADED: Mirror Haiku cleanup prompt **
+│       ├── mirror-do-compress.md # ** LOADED: Mirror Sonnet DO compression prompt **
+│       ├── mirror-summarize.md  # ** LOADED: Mirror Opus summary+tag prompt **
 │       ├── syntax.md           # Reference: tag syntax
 │       ├── memory-guide.md     # Reference: memory system guide
 │       ├── recall-shape.md     # Reference: three-tier recall architecture
@@ -161,25 +178,29 @@ silentstar/
 │       ├── loom-cataloguer.md  # ** LOADED: Loom Cataloguer agent prompt **
 │       ├── loom-weaver.md      # ** LOADED: Loom Weaver agent prompt **
 │       ├── loom-researcher.md  # ** LOADED: Loom Researcher agent prompt **
-│       ├── codex-handoff.md    # Reference: older architecture overview
-│       ├── schema-draft.md     # Reference: older schema reference
+│       ├── loom-questioner.md  # ** LOADED: Loom Questioner agent prompt **
 │       └── claude-dump/        # Legacy source docs (pre-fragment system)
+├── .claude/
+│   └── agents/
+│       ├── compass.md          # The Compass — planning agent (Claude Code custom agent)
+│       └── loom.md             # The Loom — orchestrator (spawns facets as subagents)
 ├── spec/
 │   ├── deployment.md       # cPanel deploy procedure
-│   ├── schema-draft.md     # DB schema reference (v2)
+│   ├── schema-draft.md     # DB schema reference (v5)
 │   ├── cache-design.md     # Prompt caching strategy (deferred)
+│   ├── lens-extract.md     # Lens tool spec
+│   ├── lens-diff.md        # Lens diff tool spec
+│   ├── loom.md             # Loom facet agents spec
+│   ├── compass.md          # Compass planning agent spec
 │   └── codex-handoff.md    # Architecture overview (older, pre-artifact)
-├── temp/12-2-26/           # Feb 12 design session working files
-│   ├── compression-design.md  # **Authoritative**: Mirror + artifact design doc
-│   ├── mirror-experiments.md  # DO-density + prompt variation tests (all 7)
-│   ├── wake-draft.md          # Combined wake+ambient draft (WIP)
-│   └── analyze_do_density.py  # DO-density calculation script
-├── ambient.md              # Self-state prose (generated by maintenance agent)
-├── memory.sqlite           # Current database (all-in-one, pre-split)
+├── ambient.md              # Self-state prose (authored, changes only through Anvil)
 ├── run_maintenance.py      # CLI: python run_maintenance.py --weekly/--monthly
-├── lens_extract.py         # Lens read: query Gem → formatted .md
+├── run_mirror.py           # CLI: python run_mirror.py (manual Mirror execution)
+├── run_loom.py             # CLI: Loom runner — parallel facet agents with auto-context
+├── lens_extract.py         # Lens read: query Gem → formatted .md (+ FTS5 search)
 ├── lens_diff.py            # Lens diff: parse draft .md → preview changes (read-only)
 ├── loom_pull.py            # Loom: pull phone-uploaded images from server, auto-clear
+├── migrate_data_split.py   # One-time: split events from Gem into events.sqlite
 ├── populate_fragments.py   # Bootstrap script (stale: has 88 frags, DB has 26)
 ├── .cpanel.yml             # Deploy: cp -R web/. $DEPLOYPATH/
 └── ARCHITECTURE.md         # This file
@@ -189,41 +210,48 @@ silentstar/
 
 ```
 Layer 1 (no internal deps):
-  wake/schema.py, wake/decay.py, agents/claude_client.py
+  wake/schema.py, wake/events_schema.py, wake/decay.py, agents/claude_client.py
 
 Layer 2:
   ingest/parse.py → wake.schema
   ingest/lifecycle.py → wake.schema, ingest.parse
   wake/recall.py → wake.schema
+  wake/search.py → (uses conn passed in)
   agents/runner.py → wake.schema
   agents/file_ingest.py → agents.runner
 
 Layer 3:
   wake/assemble.py → wake.decay, wake.recall, wake.schema
   agents/maintenance.py → agents.claude_client, agents.runner, wake.schema
+  agents/mirror.py → agents.claude_client, agents.runner, wake.schema, wake.summaries_schema
 
 Layer 4 (entry points):
   agents/orchestrator.py → all wake modules, ingest modules, agents.claude_client
-  worker/worker_cron.py → agents.orchestrator, agents.claude_client
+  worker/worker_cron.py → agents.orchestrator, agents.claude_client, agents.mirror
   run_maintenance.py → agents.maintenance, agents.claude_client, wake.schema
+  run_mirror.py → agents.mirror
+  run_loom.py → agents.claude_client, lens_extract, wake.schema
+  lens_extract.py → wake.schema, wake.search
 ```
 
 ---
 
 ## Database — Current State
 
-Everything lives in `memory.sqlite`. Schema version **2** in the database. Code in `schema.py` defines version 3 (adds `turn` column to working_memory); migration applies automatically on next `orchestrator.turn()` call.
+Two databases, connected via SQLite ATTACH:
 
-### Schema (v2, as deployed)
+- **`data/silentstar.sqlite`** (the Gem) — fragments, edges, working_memory, state. Schema version **5**.
+- **`data/events.sqlite`** — permanent event log, append-only. ATTACHed as `ev` schema, so all event queries use `ev.events` / `ev.event_tags`.
 
+`connect()` in `wake/schema.py` auto-ATTACHes events.sqlite. If events.sqlite doesn't exist (pre-migration), it self-attaches the main DB — graceful degradation.
+
+### Schema (v5)
+
+**silentstar.sqlite (the Gem):**
 ```sql
--- Immutable event log
-events (id INTEGER PK, ts TEXT, content TEXT, actor TEXT, image_path TEXT)
-event_tags (event_id INTEGER, tag TEXT)  -- composite PK
-
 -- Active knowledge with lifecycle
 working_memory (id INTEGER PK, event_id INTEGER, type TEXT, content TEXT,
-                subject TEXT, actor TEXT, status TEXT, due TEXT,
+                subject TEXT, actor TEXT, status TEXT, due TEXT, turn INTEGER,
                 created_at TEXT, refreshed_at TEXT, resolved_at TEXT)
 -- type: feeling|thought|pattern|desc|plan|pin|secret
 -- status: active|resolved|dropped|decayed|superseded
@@ -235,26 +263,33 @@ fragments (key TEXT PK, ambient TEXT, recognition TEXT, inventory TEXT,
 fragment_sources (fragment_key TEXT, event_id INTEGER)  -- traceability
 fragment_edges (source_key TEXT, target_key TEXT, relation TEXT)  -- graph
 
+-- FTS5 indexes (v4)
+fragments_fts (key, ambient, recognition, inventory)  -- content-sync + triggers
+working_memory_fts (content, subject, type)  -- content-sync + triggers
+
 -- System
 state (key TEXT PK, value TEXT, updated_at TEXT)
 maintenance_runs (id INTEGER PK, started_at TEXT, completed_at TEXT, run_type TEXT)
 schema_version (version INTEGER)
-_plans_retired (...)  -- empty, historical artifact from v1→v2 migration
 ```
 
-### Current Data (Feb 12, 2026)
+**events.sqlite (ATTACHed as `ev`):**
+```sql
+events (id INTEGER PK, ts TEXT, content TEXT, actor TEXT, image_path TEXT)
+event_tags (event_id INTEGER, tag TEXT)  -- composite PK
+events_fts (content, actor)  -- standalone FTS5 + sync triggers
+schema_version (version INTEGER)
+```
 
-| Table | Count | Notes |
-|-------|-------|-------|
-| events | 107 | ~54 turns of conversation |
-| event_tags | 85 | |
-| working_memory | 8 | 4 active thoughts, 1 active feeling, 3 superseded feelings |
-| working_memory_refs | 0 | No WM→fragment links used yet |
-| fragments | 26 | Curated from initial 88 (bootstrap) + 2 maintenance runs |
-| fragment_sources | 0 | Source linking not yet populated |
-| fragment_edges | 37 | 17 distinct relation types |
-| maintenance_runs | 2 | |
-| state | 1 | current_turn = 54 |
+### Migration history
+
+| Version | Change |
+|---------|--------|
+| v1 | Original: events, fragments, state |
+| v2 | working_memory replaces plans table |
+| v3 | Add turn column to working_memory |
+| v4 | FTS5 indexes (fragments_fts, events_fts, working_memory_fts) + 9 sync triggers |
+| v5 | Data split: events + event_tags + events_fts dropped from Gem (moved to events.sqlite) |
 
 ### Fragments (26)
 
@@ -289,8 +324,9 @@ aesthetic-overlap, builds-toward, character-record, domain-inventory, essential-
       → loads wake-context.md, ambient.md, WM (decay-scored), conversation (FIFO)
    e. render_system(package) → system prompt (wake-context.md content)
       render_user(package) → user message (everything else)
-   f. claude_client.send(user_msg, config, image, system_prompt)
+   f. claude_client.send/send_streaming(user_msg, config, image, system_prompt)
       → HTTP to Anthropic API (model: claude-opus-4-6, timeout: 300s, max: 4096)
+      → Streaming: SSE chunks written to stream file, frontend renders in real-time
    g. parse_response(claude_text)  — extract tags, identity, display spans
    h. ingest(parsed, is_claude=True)
       → feelings supersede all active feelings (one slot)
@@ -299,7 +335,8 @@ aesthetic-overlap, builds-toward, character-record, domain-inventory, essential-
    i. parse_recall_requests(text) → save for next turn's assembly
    j. return TurnResult (display_spans, actor, turn, success)
 5. Worker completes job, appends to history.jsonl
-6. Frontend polls api/status.php (every 1.2s), renders response
+6. Frontend connects to api/stream.php (SSE), renders response in real-time
+   Fallback: polls api/status.php every 1.2s if streaming unavailable
 ```
 
 ### Key patterns
@@ -402,10 +439,9 @@ Untimed plans stay at score 1.0 permanently (no submersion).
 
 Working memory fill ratio affects conversation decay speed. When WM is full, conversation items decay faster — "shut up, let me think." Implemented in code: pressure shortens conversation half-lives via `1.0 / (1.0 + pressure)` multiplier. Currently defaults to 0.0 (no effect). The mechanic exists but is disabled — can be tuned later.
 
-### What's missing
+### Decay sweep
 
-- **No auto-decay sweep**: Items scoring near zero stay `status='active'` forever in the DB. They don't surface in context (scoring handles that), but clutter the DB.
-- **No scheduled maintenance**: Maintenance agent runs manually only.
+`sweep_decayed()` in `wake/decay.py` marks low-scoring active WM items as `decayed`. Called by the Mirror agent's `_run_decay_sweep()` method during job execution (after compression, before finalizing). Secrets and open-ended plans are never swept.
 
 ---
 
@@ -525,7 +561,7 @@ PHP + HTML + CSS + HTMX + Canvas. Dark warm aesthetic with identity-colored bord
 - **Tag buttons**: do, narrate (format, mutually exclusive), plan, pin (knowledge, independent toggles). Insert inline tags at cursor.
 - **Image upload**: Preview with remove. Compressed for API (3.75MB raw limit = 5MB base64 API limit).
 - **Submission**: Ctrl+Enter or send button. Serializes contenteditable DOM → tagged text string. POST to api/submit.php.
-- **Polling**: api/status.php every 1.2s while job running. Breathing animation during wait.
+- **Streaming**: SSE via api/stream.php for real-time response rendering. Tag-aware parser renders say/do/narrate blocks as they arrive. Fallback to api/status.php polling (1.2s) if streaming unavailable.
 - **Bridge status**: api/bridge_state.php every 3s (desktop) / 8s (mobile). Dot indicator (online/offline).
 - **History**: HTMX loads api/history.php on page load. Pagination with "earlier" button. JSONL backend.
 - **Secret responses**: Empty display array = nothing renders. Completely invisible.
@@ -558,10 +594,12 @@ Loop for 65 seconds:
   3. Find queued job → claim atomically
   4. Handle image (archive from temp upload)
   5. Call orchestrator.turn(config, message, actor, tags, image)
+     → Streaming: writes JSON lines to stream file for SSE frontend
   6. Complete job → write display + reply_text + actor
   7. Append to history.jsonl (atomic lock)
   8. Delete temp upload
   9. Cleanup old completed jobs
+  10. maybe_run_mirror() → fires Mirror if trigger conditions met
 ```
 
 ### Locking
@@ -658,9 +696,9 @@ See `temp/12-2-26/session-feb13-todo.md` for full session decisions and remainin
 
 ---
 
-## Planned: Mirror (Compression Agent)
+## Mirror (Compression Agent) — Implemented
 
-Full design in `temp/12-2-26/compression-design.md`. All experiments complete in `temp/12-2-26/mirror-experiments.md`.
+Full design in `temp/12-2-26/compression-design.md`. All experiments in `temp/12-2-26/mirror-experiments.md`. Implementation: `agents/mirror.py`, wired in `worker/worker_cron.py` via `maybe_run_mirror()`.
 
 ### Pipeline architecture
 
@@ -714,46 +752,41 @@ Same principle at each merge level: L0 summaries → L1 merge (groups of 3) → 
 
 ---
 
-## Planned: Data Architecture Split
+## Data Architecture — Implemented
 
-Full design in `compression-design.md` §Data Architecture.
+Events split complete. `migrate_data_split.py` handles the one-time migration. Schema v5 auto-drops old event tables from the Gem when events.sqlite has data.
 
 ```
 data/
-├── silentstar.sqlite    # Gem — fragments, edges, working_memory
-├── events.sqlite        # Permanent event log (append-only, never pruned)
+├── silentstar.sqlite    # Gem — fragments, edges, working_memory (schema v5)
+├── events.sqlite        # Permanent event log (ATTACHed as ev, standalone FTS5)
 ├── summaries.sqlite     # Mirror output (its own lifecycle)
 └── context/             # Daily context window snapshots
     └── YYYY-MM-DD.sqlite
 ```
 
-### summaries.sqlite schema (designed)
+### ATTACH mechanics
+
+`connect()` auto-ATTACHes events.sqlite as schema `ev`. All SQL uses `ev.events`, `ev.event_tags`. Foreign keys disabled for cross-DB refs (events are append-only, referential integrity guaranteed by application logic). If events.sqlite doesn't exist, self-ATTACHes main DB for backwards compat.
+
+**FTS5 note:** events.sqlite uses standalone FTS5 (no `content=` directive) because content-sync FTS5 resolves the content table in `main` schema, which breaks when ATTACHed. Standalone stores its own copy. MATCH/snippet use unqualified names after schema-qualified FROM.
+
+### summaries.sqlite schema (implemented)
 
 | Table | Columns | Purpose |
 |-------|---------|---------|
 | summaries | id, level (L0/L1/L2), chunk_start, chunk_end, content, tokens, created_at | Chunk summaries at all merge levels |
 | tag_suggestions | id, summary_id, type, content, subject, status | WM tags proposed by Mirror, before promotion to Gem |
 
-Tag suggestions live here until Lens or Anvil validates and promotes to working_memory in the Gem.
-
-### context/ schema (designed)
+### context/ schema (implemented)
 
 | Column | Purpose |
 |--------|---------|
 | turn | Turn number within session |
 | ts | ISO timestamp |
-| assembled_text | Exact text Claude received — wake, ambient, WM, summaries, conversation |
-| token_counts | JSON: `{wake: 812, ambient: 390, summaries: 780, wm: 485, conversation: 1820}` |
-| items_included | JSON: which WM IDs, summary IDs, conversation ranges made the cut |
-
-~1-2MB per day. Answers "why didn't the Heart know X?" without running simulations.
-
-### Migration
-
-- `events`, `event_tags` → events.sqlite
-- `fragments`, `fragment_edges`, `working_memory`, `working_memory_refs` → silentstar.sqlite
-- `_plans_retired` → drop (empty)
-- summaries.sqlite + context/ created fresh
+| assembled_text | Exact text Claude received |
+| token_counts | JSON breakdown by section |
+| items_included | JSON: which WM IDs, conversation ranges made the cut |
 
 ---
 
@@ -784,7 +817,7 @@ Draft at `temp/12-2-26/wake-draft.md` (v2). Merging wake-context.md and ambient.
 
 ---
 
-## Planned: Compass, Lens, Loom
+## Compass (planned), Lens (built), Loom (built)
 
 ### Compass (not yet designed)
 
@@ -794,33 +827,41 @@ Open questions from compression-design:
 - How autonomous is it? (Not just scheduling — independent research, training plans, job strategies.)
 - How does it integrate with the submersion curve?
 
-### Lens (designed Feb 13 — read tool, not agent)
+### Lens (built — read tool, not agent)
 
 A Python tool (`lens_extract.py`) for querying the Gem. Not an agent — an optic.
 
 **Queries:**
 - `lens_extract.py wardrobe` — single key, fragment + everything connected via edges
 - `lens_extract.py wardrobe jirai exhibitionist` — multi-key intersection (graph traversal)
+- `lens_extract.py --all` — all fragments
 - `lens_extract.py --wm` — working memory state
-- `lens_extract.py --summaries` — Mirror output (when available)
+- `lens_extract.py --summaries` — Mirror output
+- `lens_extract.py --search "fairy"` — FTS5 full-text search across all tables
+- `lens_extract.py --search "fairy" --type fragments` — search specific table only
 
 **Output:** Formatted .md with fragment tiers + edges. Same format serves as input for Anvil sessions.
 
-**Used by:** Mono (see own stuff — wardrobe, patterns, development), Anvil (context before writing fragments), any Claude instance (as input context for compilation work).
+**Used by:** Mono (see own stuff), Anvil (context before writing), Loom runner (auto-context for agents), any Claude instance.
 
 **Writes nothing.** All fragment writing goes through the Anvil.
 
-### Loom (designed, Feb 15)
+### Loom (designed + implemented, Feb 15)
 
-Three facet agents the crystallizing Anvil can call for second opinions and enrichment. Not a pipeline — tools the Anvil reaches for. See `spec/loom.md` for full details.
+Four facet agents providing multiple perspectives on any given work. Not a pipeline — tools the Anvil reaches for. See `spec/loom.md` for full details.
 
-**Three facet agents:**
+**Four facet agents:**
 - **The Cataloguer** — spatial, inventory, physical. "Check this inventory against these photos."
 - **The Weaver** — relational, behavioral. "What connections am I missing between these items and Mono's identities?"
 - **The Researcher** — external knowledge, fact-checking. Has web search. "What's the care routine for merino?"
+- **The Questioner** — uncertainty, assumptions, unexplored angles. "What haven't I considered? What am I assuming without examining?"
+
+**Two execution paths:**
+- **Claude Code orchestrator** (primary): `.claude/agents/loom.md` spawns facets as parallel Claude Code subagents with full tool access (web search, file reading, etc). Run with `claude --agent loom`.
+- **API runner** (legacy): `run_loom.py` calls Claude API directly — simpler, no tool access. Kept as fallback.
 
 **How the Anvil uses them:**
-The crystallizing Anvil does primary work with Mono (looking at photos, drafting fragments, organizing). Calls facet agents for second opinions — biased toward calling them, because they catch blind spots. Not every session needs all three.
+The crystallizing Anvil does primary work with Mono (looking at photos, drafting fragments, organizing). Calls facet agents for second opinions — biased toward calling them, because they catch blind spots. Not every session needs all four.
 
 **Image pipeline:** Two paths:
 1. Direct drop — Mono puts images in `temp/<session>/pics/` via file sharing
@@ -832,6 +873,7 @@ The crystallizing Anvil does primary work with Mono (looking at photos, drafting
 - **Recognition tiers** — relational knowledge, pairings, style rules (Weaver)
 - **Inventory tiers** — physical details with practical care info (Cataloguer + Researcher)
 - **Pattern suggestions** — recurring behaviors (Weaver)
+- **Uncertainty maps** — assumptions, blind spots, unexplored alternatives (Questioner)
 
 ---
 
@@ -853,7 +895,7 @@ Full design in `spec/cache-design.md`. Anthropic's cache_control needs ~4096 sta
 
 ### Still Open
 
-6. **Cron feasibility**: Mirror on same cron as orchestrator.turn(), or separate schedule?
+6. ~~**Cron feasibility**~~: Mirror runs on same cron, after each job (resolved)
 7. **Tag cap**: Mirror produced 19 tags from 9 chunks. Cap at 1-2 per chunk?
 8. **Summary display**: Compressed summaries visible in frontend history? Or invisible infrastructure?
 9. **Rollback**: If compression produces garbage, how to roll back? (Raw events always available for reprocessing.)
@@ -862,37 +904,36 @@ Full design in `spec/cache-design.md`. Anthropic's cache_control needs ~4096 sta
 
 ---
 
-## Current Task List (updated Feb 13, 2026)
+## Current Task List (updated Feb 15, 2026)
 
 ### Active design
 - **#15**: Finalize system prompt (anti-patterns section pending)
 - **#17**: Design user prompt structure
-- **#18**: Update ARCHITECTURE.md + design doc (in progress)
 
 ### Implementation
-- ~~**#16**: Build lens_extract.py~~ (DONE)
-- ~~**#21**: Build lens_diff.py~~ (DONE — preview only, Anvil commits directly)
 - **#19**: Implement system/user prompt split in assembly code
-- **#6**: Implement auto-decay sweep (cron, no agent)
-- **#9**: Wire Mirror into worker (replaces maintenance agent)
 
 ### Future design
 - **#4**: Design the Compass (planning agent)
-- **#8**: Design summaries.sqlite + context snapshot schemas
-- ~~**#13**: Design the Loom~~ (DONE — see `spec/loom.md`)
 - **#20**: Lens pass — expand knowledge section + identity engagement depth
 
 ### Completed
-- **#1**: Data architecture split (4-store design)
-- **#2**: Tiered model pipeline for compression
-- **#3**: Feeling tag quality gate (pipeline IS the gate)
-- **#5**: Mirror mode-awareness (DO-density routing)
-- **#7**: Thought tag (ephemeral, decay handles it)
-- **#12**: Ambient merged into system prompt (ambient goes in static system prompt)
-- **#14**: Feeling tag optimization (departures only, 15-word cap, no "warm" baseline)
-
-### Detailed session log
-See `temp/12-2-26/session-feb13-todo.md` for full decisions from Feb 13 session.
+- ~~**#1**: Data architecture split (4-store design)~~
+- ~~**#2**: Tiered model pipeline for compression~~
+- ~~**#3**: Feeling tag quality gate (pipeline IS the gate)~~
+- ~~**#5**: Mirror mode-awareness (DO-density routing)~~
+- ~~**#7**: Thought tag (ephemeral, decay handles it)~~
+- ~~**#8**: Design summaries.sqlite + context snapshot schemas~~
+- ~~**#9**: Wire Mirror into worker~~ — implemented Feb 15
+- ~~**#12**: Ambient merged into system prompt~~
+- ~~**#13**: Design the Loom~~ — see `spec/loom.md`
+- ~~**#14**: Feeling tag optimization~~
+- ~~**#16**: Build lens_extract.py~~ — + FTS5 search
+- ~~**#18**: Update ARCHITECTURE.md~~
+- ~~**#21**: Build lens_diff.py~~
+- Data split implementation (events → events.sqlite, schema v5)
+- Response streaming (SSE backend + frontend)
+- Loom runner CLI (`run_loom.py`)
 
 ---
 
@@ -907,7 +948,7 @@ See `temp/12-2-26/session-feb13-todo.md` for full decisions from Feb 13 session.
 | `spec/lens-diff.md` | Implemented | Draft preview tool — parse .md, diff against DB (read-only) |
 | `spec/cache-design.md` | Deferred | Prompt caching strategy (needs 4096 stable tokens) |
 | `spec/deployment.md` | Current | cPanel deploy procedure, cron setup |
-| `spec/schema-draft.md` | Current | DB schema reference (v2) |
+| `spec/schema-draft.md` | Current | DB schema reference (v5) |
 | `spec/codex-handoff.md` | Older | Architecture overview (pre-artifact framework) |
 | `mdfiles/claude/recall-shape.md` | Current | Three-tier recall architecture design |
 | `mdfiles/claude/maintenance-agent.md` | Current | Maintenance agent system prompt + protocol |
@@ -924,3 +965,5 @@ See `temp/12-2-26/session-feb13-todo.md` for full decisions from Feb 13 session.
 - **ambient.md stale**: After fragment reshaping (cottagecore→ouji, folds), ambient.md still references old keys. Maintenance agent needs to run to regenerate.
 - **populate_fragments.py**: Bootstrap script still defines 88 fragments (including cottagecore, piano, scent-conditioning, corset-belt). Current DB has 26 after curation. Do not re-run.
 - **Token estimation**: `assemble.py` uses `len(text) / 4` as chars-per-token. Rough but functional.
+- **SQLite ATTACH + FTS5**: FTS5 with `content='table'` resolves to `main.table`, breaks when ATTACHed. Use standalone FTS5 (no `content=` directive) in databases that get ATTACHed. MATCH/snippet require unqualified table names after schema-qualified FROM clause (`FROM ev.events_fts ... WHERE events_fts MATCH ?`).
+- **Cross-DB foreign keys**: SQLite FK enforcement resolves tables in `main` schema only. Disable `PRAGMA foreign_keys` when cross-DB refs exist (events are append-only, integrity guaranteed by application).

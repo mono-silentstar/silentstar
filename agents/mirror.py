@@ -201,7 +201,7 @@ def should_fire_mirror(mem_conn: sqlite3.Connection, sum_conn: sqlite3.Connectio
 
     # Count new events — fast check before loading anything
     new_count = mem_conn.execute(
-        "SELECT COUNT(*) as cnt FROM events WHERE id > ?", (since_id,)
+        "SELECT COUNT(*) as cnt FROM ev.events WHERE id > ?", (since_id,)
     ).fetchone()["cnt"]
 
     if new_count < TRIGGER_MIN_EVENTS:
@@ -210,7 +210,7 @@ def should_fire_mirror(mem_conn: sqlite3.Connection, sum_conn: sqlite3.Connectio
     # Load new events for analysis
     new_events = mem_conn.execute("""
         SELECT id, content, actor, ts
-        FROM events WHERE id > ?
+        FROM ev.events WHERE id > ?
         ORDER BY id ASC
     """, (since_id,)).fetchall()
 
@@ -310,8 +310,8 @@ class MirrorAgent(Agent):
         events = conn.execute("""
             SELECT e.id, e.ts, e.content, e.actor,
                    GROUP_CONCAT(t.tag) as tags
-            FROM events e
-            LEFT JOIN event_tags t ON t.event_id = e.id
+            FROM ev.events e
+            LEFT JOIN ev.event_tags t ON t.event_id = e.id
             WHERE e.id > ?
             GROUP BY e.id
             ORDER BY e.id ASC
@@ -329,8 +329,8 @@ class MirrorAgent(Agent):
             overlap = conn.execute("""
                 SELECT e.id, e.ts, e.content, e.actor,
                        GROUP_CONCAT(t.tag) as tags
-                FROM events e
-                LEFT JOIN event_tags t ON t.event_id = e.id
+                FROM ev.events e
+                LEFT JOIN ev.event_tags t ON t.event_id = e.id
                 WHERE e.id > ? AND e.id <= ?
                 GROUP BY e.id
                 ORDER BY e.id ASC
@@ -406,7 +406,10 @@ class MirrorAgent(Agent):
         )
 
         # Run decay sweep — mark dead WM items after compression
-        self._run_decay_sweep(conn, result)
+        try:
+            self._run_decay_sweep(conn, result)
+        except Exception as e:
+            result.errors.append(f"Decay sweep failed: {e}")
 
         return result
 
@@ -503,4 +506,6 @@ class MirrorAgent(Agent):
 
     def _load_prompt(self, filename: str) -> str:
         path = self.prompt_dir / filename
+        if not path.exists():
+            raise FileNotFoundError(f"Mirror prompt not found: {path}")
         return path.read_text(encoding="utf-8")

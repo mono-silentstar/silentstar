@@ -9,6 +9,9 @@ memory.sqlite-shm
 data/silentstar.sqlite
 data/silentstar.sqlite-wal
 data/silentstar.sqlite-shm
+data/events.sqlite
+data/events.sqlite-wal
+data/events.sqlite-shm
 data/summaries.sqlite
 data/summaries.sqlite-wal
 data/summaries.sqlite-shm
@@ -23,6 +26,8 @@ data/uploads_tmp/
 data/img-dump/
 data/history.jsonl
 legacy/data/
+legacy/web/data/
+temp/
 
 # Python
 __pycache__/
@@ -43,5 +48,6 @@ nul
 *.swp
 *.swo
 
-# Claude Code
-.claude/
+# Claude Code (keep agents/ in repo)
+.claude/*
+!.claude/agents/

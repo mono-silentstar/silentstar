@@ -67,8 +67,8 @@ class MaintenanceAgent(Agent):
         new_events = conn.execute("""
             SELECT e.id, e.ts, e.content, e.actor,
                    GROUP_CONCAT(t.tag) as tags
-            FROM events e
-            LEFT JOIN event_tags t ON t.event_id = e.id
+            FROM ev.events e
+            LEFT JOIN ev.event_tags t ON t.event_id = e.id
             WHERE e.ts > ?
             GROUP BY e.id
             ORDER BY e.ts ASC
@@ -168,7 +168,7 @@ class MaintenanceAgent(Agent):
         if reasoning:
             now = datetime.now(timezone.utc).isoformat()
             conn.execute(
-                "INSERT INTO events (ts, content, actor) VALUES (?, ?, ?)",
+                "INSERT INTO ev.events (ts, content, actor) VALUES (?, ?, ?)",
                 (now, f"[maintenance/{self.run_type}] {reasoning}", "system"),
             )
             result.events_created += 1

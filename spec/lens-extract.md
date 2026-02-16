@@ -17,8 +17,16 @@ python lens_extract.py --all
 # Working memory state
 python lens_extract.py --wm
 
-# Mirror summaries (when available)
+# Mirror summaries
 python lens_extract.py --summaries
+
+# FTS5 full-text search across all tables
+python lens_extract.py --search "fairy"
+
+# Search specific table only
+python lens_extract.py --search "fairy" --type fragments
+python lens_extract.py --search "fairy" --type events
+python lens_extract.py --search "fairy" --type wm
 
 # Output to file instead of stdout
 python lens_extract.py wardrobe -o temp/lens/wardrobe.md

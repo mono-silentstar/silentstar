@@ -217,7 +217,7 @@ def _load_working_memory(
     """).fetchall()
 
     # Estimate turn rate for WM items (they don't store creation turn)
-    first_row = conn.execute("SELECT MIN(ts) FROM events").fetchone()
+    first_row = conn.execute("SELECT MIN(ts) FROM ev.events").fetchone()
     turn_rate = 0.0  # turns per second
     if first_row and first_row[0] and current_turn > 0:
         first_ts = datetime.fromisoformat(first_row[0]).replace(tzinfo=timezone.utc)
@@ -348,8 +348,8 @@ def _load_conversation(
     rows = conn.execute("""
         SELECT e.id, e.ts, e.content, e.actor, e.image_path,
                GROUP_CONCAT(t.tag) as tags
-        FROM events e
-        LEFT JOIN event_tags t ON t.event_id = e.id AND t.tag IN ('say', 'do', 'narrate')
+        FROM ev.events e
+        LEFT JOIN ev.event_tags t ON t.event_id = e.id AND t.tag IN ('say', 'do', 'narrate')
         WHERE t.tag IS NOT NULL OR e.actor IS NOT NULL
         GROUP BY e.id
         ORDER BY e.ts DESC
