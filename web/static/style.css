@@ -24,6 +24,7 @@
   --id-luna:     #b0b0bc;
   --id-chloe:    #d4c478;
   --id-strah:    #9a6b72;
+  --id-ylhara:   #a89cc4;
 
   --tag-do:         #c4967a;
   --tag-narrate:    #8a9a7a;
@@ -353,7 +354,7 @@ html, body {
 .actor[data-actor="strah"]   { color: #9a6b72; }
 .actor[data-actor="mono"]    { color: var(--mono-accent); }
 .actor[data-actor="claude"]  { color: var(--claude-accent); }
-.actor[data-actor="y'lhara"] { color: #a89cc4; }
+.actor[data-actor="y'lhara"] { color: var(--id-ylhara); }
 
 .body {
   font-size: 14px;
@@ -410,7 +411,7 @@ html, body {
 
 .inline-narrate {
   font-size: 13px;
-  opacity: 0.7;
+  opacity: 0.68;
   color: var(--tag-narrate);
 }
 
@@ -625,7 +626,7 @@ time {
 
 /* Format styles in the input */
 .input-fmt-do      { opacity: 0.65; filter: saturate(0.7); }
-.input-fmt-narrate { color: var(--tag-narrate); opacity: 0.75; }
+.input-fmt-narrate { color: var(--tag-narrate); opacity: 0.72; }
 
 /* Knowledge tag styles in the input */
 .input-tag-plan { border-bottom: 2px dashed var(--tag-plan); background: rgba(184, 154, 106, 0.08); padding: 0 2px; border-radius: 2px; }
